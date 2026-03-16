@@ -53,6 +53,11 @@ model Agent {
   primaryProperties   Property[]         @relation("PrimaryAgentProperties")
   coListedProperties  PropertyCoListing[]
   viewedProperties    PropertyView[]
+  ownedViewEvents     PropertyView[]     @relation("OwnedPropertyViews")
+  dashboardStats      AgentDashboardStats?
+  dailyStats          AgentDailyStat[]
+  propertyAnalytics   PropertyAnalytics[]
+  propertyViewDaily   PropertyViewDaily[]
   reviewedFlags       SuspiciousFlag[]   @relation("ReviewedFlags")
   flagReviewActions   FlagReviewAction[]
 }
@@ -78,6 +83,8 @@ model Property {
   primaryAgent    Agent             @relation("PrimaryAgentProperties", fields: [primaryAgentId], references: [id], onDelete: Cascade)
   coListings      PropertyCoListing[]
   views           PropertyView[]
+  analytics       PropertyAnalytics?
+  dailyViews      PropertyViewDaily[]
   suspiciousFlags SuspiciousFlag[]
 
   @@index([primaryAgentId, status, createdAt(sort: Desc)])
@@ -98,15 +105,69 @@ model PropertyCoListing {
 model PropertyView {
   id           String     @id @default(cuid())
   propertyId   String
+  ownerAgentId String
   viewerType   ViewerType
   viewerAgentId String?
   visitorId    String?
   viewedAt     DateTime   @default(now())
   property     Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  ownerAgent   Agent      @relation("OwnedPropertyViews", fields: [ownerAgentId], references: [id], onDelete: Cascade)
   viewerAgent  Agent?     @relation(fields: [viewerAgentId], references: [id], onDelete: SetNull)
 
   @@index([propertyId, viewedAt(sort: Desc)])
+  @@index([ownerAgentId, viewedAt(sort: Desc)])
   @@index([viewedAt(sort: Desc)])
+}
+
+model AgentDashboardStats {
+  agentId                 String   @id
+  draftCount              Int      @default(0)
+  activeCount             Int      @default(0)
+  soldCount               Int      @default(0)
+  archivedCount           Int      @default(0)
+  totalViewsAllTime       Int      @default(0)
+  cumulativeDaysToSell    Int      @default(0)
+  soldWithActivationCount Int      @default(0)
+  updatedAt               DateTime @updatedAt
+  agent                   Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+}
+
+model AgentDailyStat {
+  id           String   @id @default(cuid())
+  agentId      String
+  date         DateTime @db.Date
+  viewCount    Int      @default(0)
+  soldCount    Int      @default(0)
+  salesRevenue Decimal  @default(0) @db.Decimal(14, 2)
+  agent        Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, date])
+  @@index([agentId, date(sort: Desc)])
+}
+
+model PropertyAnalytics {
+  propertyId         String   @id
+  agentId            String
+  lifetimeViewCount  Int      @default(0)
+  lastViewedAt       DateTime?
+  property           Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  agent              Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@index([agentId, lifetimeViewCount(sort: Desc), lastViewedAt(sort: Desc)])
+}
+
+model PropertyViewDaily {
+  id         String   @id @default(cuid())
+  agentId    String
+  propertyId String
+  date       DateTime @db.Date
+  viewCount  Int      @default(0)
+  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, propertyId, date])
+  @@index([agentId, date(sort: Desc)])
+  @@index([propertyId, date(sort: Desc)])
 }
 
 model SuspiciousFlag {

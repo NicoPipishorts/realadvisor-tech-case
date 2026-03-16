@@ -5,6 +5,7 @@ import {
   Prisma,
   ViewerType,
   PropertyStatus as PrismaPropertyStatus,
+  type PropertyAnalytics,
   type Property,
   type PropertyView,
   type SuspiciousFlag
@@ -13,6 +14,11 @@ import { z } from 'zod';
 
 import type { Context } from '../../context.js';
 import { requireAgentId, signAgentToken, verifyPassword } from '../../lib/auth.js';
+import {
+  applyPropertyStateDelta,
+  ensureAgentAnalyticsBackfilled,
+  recordPropertyViewAnalytics
+} from '../../lib/analytics.js';
 import { runAutomaticDetection } from '../../lib/detection.js';
 
 type LoginArgs = {
@@ -60,9 +66,7 @@ type PropertyInputArgs = {
 type UpdatePropertyArgs = PropertyArgs & PropertyInputArgs;
 
 type PropertyWithRelations = Property & {
-  _count: {
-    views: number;
-  };
+  analytics: Pick<PropertyAnalytics, 'lifetimeViewCount'> | null;
   suspiciousFlags: Array<
     Pick<
       SuspiciousFlag,
@@ -99,9 +103,9 @@ const propertyInputSchema = z.object({
 });
 
 const propertyInclude = {
-  _count: {
+  analytics: {
     select: {
-      views: true
+      lifetimeViewCount: true
     }
   },
   suspiciousFlags: {
@@ -197,7 +201,7 @@ const mapProperty = (property: PropertyWithRelations) => {
     propertyType: property.propertyType,
     status: property.status,
     createdAt: property.createdAt.toISOString(),
-    viewCount: property._count.views,
+    viewCount: property.analytics?.lifetimeViewCount ?? 0,
     isFlagged: Boolean(flag),
     flag,
     latestFlag
@@ -285,81 +289,57 @@ export const resolvers = {
     dashboardStats: async (_parent: unknown, _args: unknown, context: Context) => {
       const agentId = requireAgentId(context);
       const monthStart = startOfCurrentMonth();
-      const [
-        statusBreakdownRows,
-        totalViewsAllTime,
-        totalViewsThisMonth,
-        soldAggregate,
-        averageDaysRow
-      ] = await Promise.all([
-        context.prisma.property.groupBy({
-          by: ['status'],
-          where: {
-            primaryAgentId: agentId
-          },
-          _count: {
-            _all: true
-          }
+      await ensureAgentAnalyticsBackfilled(context.prisma, agentId);
+      const [summary, monthTotals] = await Promise.all([
+        context.prisma.agentDashboardStats.findUniqueOrThrow({
+          where: { agentId }
         }),
-        context.prisma.propertyView.count({
+        context.prisma.agentDailyStat.aggregate({
           where: {
-            property: { primaryAgentId: agentId }
-          }
-        }),
-        context.prisma.propertyView.count({
-          where: {
-            viewedAt: { gte: monthStart },
-            property: { primaryAgentId: agentId }
-          }
-        }),
-        context.prisma.property.aggregate({
-          where: {
-            primaryAgentId: agentId,
-            status: PrismaPropertyStatus.SOLD,
-            soldAt: { gte: monthStart }
-          },
-          _count: {
-            _all: true
+            agentId,
+            date: { gte: monthStart }
           },
           _sum: {
-            price: true
+            viewCount: true,
+            soldCount: true,
+            salesRevenue: true
           }
-        }),
-        context.prisma.$queryRaw<Array<{ averageDaysToSell: number | null }>>(Prisma.sql`
-          SELECT COALESCE(
-            AVG(EXTRACT(EPOCH FROM ("soldAt" - "activatedAt")) / 86400),
-            0
-          )::float AS "averageDaysToSell"
-          FROM "Property"
-          WHERE "primaryAgentId" = ${agentId}
-            AND "status" = ${PrismaPropertyStatus.SOLD}::"PropertyStatus"
-            AND "soldAt" IS NOT NULL
-            AND "activatedAt" IS NOT NULL
-        `)
+        })
       ]);
 
       const statusBreakdown = [
-        PrismaPropertyStatus.DRAFT,
-        PrismaPropertyStatus.ACTIVE,
-        PrismaPropertyStatus.SOLD,
-        PrismaPropertyStatus.ARCHIVED
-      ].map((status) => ({
-        status,
-        count: statusBreakdownRows.find((row) => row.status === status)?._count._all ?? 0
-      }));
-      const totalActiveProperties =
-        statusBreakdown.find((row) => row.status === PrismaPropertyStatus.ACTIVE)?.count ?? 0;
-      const propertiesSoldThisMonth = soldAggregate._count._all;
-      const recentSalesRevenueLast30Days = Number(soldAggregate._sum.price ?? 0);
+        {
+          status: PrismaPropertyStatus.DRAFT,
+          count: summary.draftCount
+        },
+        {
+          status: PrismaPropertyStatus.ACTIVE,
+          count: summary.activeCount
+        },
+        {
+          status: PrismaPropertyStatus.SOLD,
+          count: summary.soldCount
+        },
+        {
+          status: PrismaPropertyStatus.ARCHIVED,
+          count: summary.archivedCount
+        }
+      ];
+      const totalActiveProperties = summary.activeCount;
+      const propertiesSoldThisMonth = monthTotals._sum.soldCount ?? 0;
+      const recentSalesRevenueLast30Days = Number(monthTotals._sum.salesRevenue ?? 0);
 
       return {
         statusBreakdown,
-        totalViewsAllTime,
+        totalViewsAllTime: summary.totalViewsAllTime,
         totalActiveProperties,
-        totalViewsThisMonth,
+        totalViewsThisMonth: monthTotals._sum.viewCount ?? 0,
         propertiesSoldThisMonth,
         recentSalesRevenueLast30Days,
-        averageDaysToSell: Math.round(averageDaysRow[0]?.averageDaysToSell ?? 0)
+        averageDaysToSell:
+          summary.soldWithActivationCount > 0
+            ? Math.round(summary.cumulativeDaysToSell / summary.soldWithActivationCount)
+            : 0
       };
     },
     dashboardViewsOverTime: async (
@@ -372,19 +352,26 @@ export const resolvers = {
       const offsetDays = Math.max(args.offsetDays ?? 0, 0);
       const endDate = endOfDay(daysAgo(offsetDays));
       const startDate = daysAgo(offsetDays + rangeDays - 1);
-      const rows = await context.prisma.$queryRaw<Array<{ date: Date; views: number }>>(Prisma.sql`
-        SELECT DATE_TRUNC('day', pv."viewedAt")::date AS "date", COUNT(*)::int AS "views"
-        FROM "PropertyView" pv
-        INNER JOIN "Property" p ON p."id" = pv."propertyId"
-        WHERE p."primaryAgentId" = ${agentId}
-          AND pv."viewedAt" >= ${startDate}
-          AND pv."viewedAt" <= ${endDate}
-        GROUP BY 1
-        ORDER BY 1 ASC
-      `);
+      await ensureAgentAnalyticsBackfilled(context.prisma, agentId);
+      const rows = await context.prisma.agentDailyStat.findMany({
+        where: {
+          agentId,
+          date: {
+            gte: startDate,
+            lte: endDate
+          }
+        },
+        select: {
+          date: true,
+          viewCount: true
+        },
+        orderBy: {
+          date: 'asc'
+        }
+      });
 
       const countsByDate = new Map(
-        rows.map((row) => [row.date.toISOString().slice(0, 10), Number(row.views)])
+        rows.map((row) => [row.date.toISOString().slice(0, 10), Number(row.viewCount)])
       );
 
       return Array.from({ length: rangeDays }, (_, index) => {
@@ -407,41 +394,56 @@ export const resolvers = {
         throw new Error('Invalid date.');
       }
 
-      const rows = await context.prisma.$queryRaw<
-        Array<{
-          id: string;
-          title: string;
-          status: PrismaPropertyStatus;
-          viewCount: number;
-        }>
-      >(Prisma.sql`
-        SELECT p."id", p."title", p."status", COUNT(pv."id")::int AS "viewCount"
-        FROM "PropertyView" pv
-        INNER JOIN "Property" p ON p."id" = pv."propertyId"
-        WHERE p."primaryAgentId" = ${agentId}
-          AND pv."viewedAt" >= ${startDate}
-          AND pv."viewedAt" <= ${endOfDay(startDate)}
-        GROUP BY p."id", p."title", p."status"
-        ORDER BY "viewCount" DESC, p."title" ASC
-      `);
+      await ensureAgentAnalyticsBackfilled(context.prisma, agentId);
+      const rows = await context.prisma.propertyViewDaily.findMany({
+        where: {
+          agentId,
+          date: startDate
+        },
+        include: {
+          property: {
+            select: {
+              id: true,
+              title: true,
+              status: true
+            }
+          }
+        },
+        orderBy: [{ viewCount: 'desc' }, { property: { title: 'asc' } }]
+      });
 
-      return rows;
+      return rows.map((row) => ({
+        id: row.property.id,
+        title: row.property.title,
+        status: row.property.status,
+        viewCount: row.viewCount
+      }));
     },
     topViewedProperties: async (_parent: unknown, args: ListArgs, context: Context) => {
       const agentId = requireAgentId(context);
       const limit = Math.max(1, Math.min(args.limit ?? 5, 10));
+      await ensureAgentAnalyticsBackfilled(context.prisma, agentId);
+      const rows = await context.prisma.propertyAnalytics.findMany({
+        where: { agentId },
+        take: limit,
+        orderBy: [{ lifetimeViewCount: 'desc' }, { lastViewedAt: 'desc' }],
+        include: {
+          property: {
+            select: {
+              id: true,
+              title: true,
+              status: true
+            }
+          }
+        }
+      });
 
-      return context.prisma.$queryRaw<
-        Array<{ id: string; title: string; status: PrismaPropertyStatus; viewCount: number }>
-      >(Prisma.sql`
-        SELECT p."id", p."title", p."status", COUNT(pv."id")::int AS "viewCount"
-        FROM "Property" p
-        LEFT JOIN "PropertyView" pv ON pv."propertyId" = p."id"
-        WHERE p."primaryAgentId" = ${agentId}
-        GROUP BY p."id", p."title", p."status", p."createdAt"
-        ORDER BY "viewCount" DESC, p."createdAt" DESC
-        LIMIT ${limit}
-      `);
+      return rows.map((row) => ({
+        id: row.property.id,
+        title: row.property.title,
+        status: row.property.status,
+        viewCount: row.lifetimeViewCount
+      }));
     },
     flaggedProperties: async (_parent: unknown, args: ListArgs, context: Context) => {
       const agentId = requireAgentId(context);
@@ -579,13 +581,19 @@ export const resolvers = {
     createProperty: async (_parent: unknown, args: PropertyInputArgs, context: Context) => {
       const agentId = requireAgentId(context);
       const input = propertyInputSchema.parse(args.input);
-      const property = await context.prisma.property.create({
-        data: {
-          primaryAgentId: agentId,
-          ...input,
-          ...buildLifecycleTimestamps(input.status)
-        },
-        include: propertyInclude
+      const property = await context.prisma.$transaction(async (tx) => {
+        const createdProperty = await tx.property.create({
+          data: {
+            primaryAgentId: agentId,
+            ...input,
+            ...buildLifecycleTimestamps(input.status)
+          },
+          include: propertyInclude
+        });
+
+        await applyPropertyStateDelta(tx, null, createdProperty);
+
+        return createdProperty;
       });
 
       await runAutomaticDetection(context.prisma, {
@@ -617,13 +625,19 @@ export const resolvers = {
       }
 
       const input = propertyInputSchema.parse(args.input);
-      const property = await context.prisma.property.update({
-        where: { id: existingProperty.id },
-        data: {
-          ...input,
-          ...buildLifecycleTimestamps(input.status, existingProperty)
-        },
-        include: propertyInclude
+      const property = await context.prisma.$transaction(async (tx) => {
+        const updatedProperty = await tx.property.update({
+          where: { id: existingProperty.id },
+          data: {
+            ...input,
+            ...buildLifecycleTimestamps(input.status, existingProperty)
+          },
+          include: propertyInclude
+        });
+
+        await applyPropertyStateDelta(tx, existingProperty, updatedProperty);
+
+        return updatedProperty;
       });
 
       await runAutomaticDetection(context.prisma, {
@@ -654,8 +668,11 @@ export const resolvers = {
         throw new Error('Property not found.');
       }
 
-      await context.prisma.property.delete({
-        where: { id: existingProperty.id }
+      await context.prisma.$transaction(async (tx) => {
+        await applyPropertyStateDelta(tx, existingProperty, null);
+        await tx.property.delete({
+          where: { id: existingProperty.id }
+        });
       });
 
       return true;
@@ -667,20 +684,32 @@ export const resolvers = {
     ) => {
       const property = await context.prisma.property.findUnique({
         where: { id: args.propertyId },
-        select: { id: true }
+        select: { id: true, primaryAgentId: true }
       });
 
       if (!property) {
         throw new Error('Property not found.');
       }
 
-      await context.prisma.propertyView.create({
-        data: {
+      const viewedAt = new Date();
+
+      await context.prisma.$transaction(async (tx) => {
+        await tx.propertyView.create({
+          data: {
+            propertyId: property.id,
+            ownerAgentId: property.primaryAgentId,
+            viewerType: context.agentId ? ViewerType.AUTHENTICATED : ViewerType.ANONYMOUS,
+            viewerAgentId: context.agentId,
+            visitorId: args.visitorId ?? null,
+            viewedAt
+          }
+        });
+
+        await recordPropertyViewAnalytics(tx, {
           propertyId: property.id,
-          viewerType: context.agentId ? ViewerType.AUTHENTICATED : ViewerType.ANONYMOUS,
-          viewerAgentId: context.agentId,
-          visitorId: args.visitorId ?? null
-        }
+          agentId: property.primaryAgentId,
+          viewedAt
+        });
       });
 
       return true;
@@ -723,8 +752,8 @@ export const resolvers = {
         throw new Error('Flag not found.');
       }
 
-      await context.prisma.$transaction([
-        context.prisma.suspiciousFlag.update({
+      await context.prisma.$transaction(async (tx) => {
+        await tx.suspiciousFlag.update({
           where: { id: flag.id },
           data: {
             status: FlagStatus.CONFIRMED,
@@ -732,23 +761,27 @@ export const resolvers = {
             reviewedAt: new Date(),
             reviewReason: args.reason
           }
-        }),
-        context.prisma.flagReviewAction.create({
+        });
+
+        await tx.flagReviewAction.create({
           data: {
             flagId: flag.id,
             agentId,
             action: FlagReviewActionType.CONFIRM,
             reason: args.reason
           }
-        }),
-        context.prisma.property.update({
+        });
+
+        const updatedProperty = await tx.property.update({
           where: { id: flag.propertyId },
           data: {
             status: PrismaPropertyStatus.ARCHIVED,
             archivedAt: new Date()
           }
-        })
-      ]);
+        });
+
+        await applyPropertyStateDelta(tx, flag.property, updatedProperty);
+      });
 
       return true;
     },
@@ -760,8 +793,8 @@ export const resolvers = {
         throw new Error('Confirmed scam flag not found.');
       }
 
-      await context.prisma.$transaction([
-        context.prisma.suspiciousFlag.update({
+      await context.prisma.$transaction(async (tx) => {
+        await tx.suspiciousFlag.update({
           where: { id: flag.id },
           data: {
             status: FlagStatus.DISMISSED,
@@ -769,16 +802,18 @@ export const resolvers = {
             reviewedAt: new Date(),
             reviewReason: args.reason
           }
-        }),
-        context.prisma.flagReviewAction.create({
+        });
+
+        await tx.flagReviewAction.create({
           data: {
             flagId: flag.id,
             agentId,
             action: FlagReviewActionType.DISMISS,
             reason: args.reason
           }
-        }),
-        context.prisma.property.update({
+        });
+
+        const updatedProperty = await tx.property.update({
           where: { id: flag.propertyId },
           data: {
             status:
@@ -787,8 +822,10 @@ export const resolvers = {
                 : flag.property.status,
             archivedAt: null
           }
-        })
-      ]);
+        });
+
+        await applyPropertyStateDelta(tx, flag.property, updatedProperty);
+      });
 
       return true;
     }

@@ -17,7 +17,7 @@ The backend is intentionally thin:
 
 - GraphQL schema + resolvers define the API boundary
 - Prisma owns persistence and relational loading
-- small library modules handle auth, env validation, and fake-listing detection
+- small library modules handle auth, env validation, fake-listing detection, and analytics aggregation
 
 The frontend follows a route-container plus shared-component pattern:
 
@@ -49,6 +49,15 @@ The schema is normalized around the core workflow: agents manage listings, listi
 - `PropertyView`
   - append-only event table for tracking listing traffic
   - supports anonymous and authenticated viewers
+  - stores `ownerAgentId` so analytics queries can scope by agent without joining back through `Property`
+- `AgentDashboardStats`
+  - pre-aggregated lifetime metrics for one agent
+- `AgentDailyStat`
+  - per-agent daily aggregates for views, sales count, and revenue
+- `PropertyAnalytics`
+  - per-property lifetime view totals and last-viewed timestamp
+- `PropertyViewDaily`
+  - per-property per-day view counters used for chart drilldown
 - `SuspiciousFlag`
   - stores one detection/review event with source, confidence, reason, rule, details, and review status
 - `FlagReviewAction`
@@ -59,6 +68,7 @@ The schema is normalized around the core workflow: agents manage listings, listi
 - A property has one primary owner because the dashboard is agent-centric and most queries are scoped to the logged-in agent.
 - Co-listing is modeled separately because it is optional and many-to-many.
 - Views are stored as events instead of counters because the dashboard needs time-series analytics and per-day drilldown.
+- I added aggregate tables next to the raw event table because the challenge explicitly calls out large-scale dashboard performance. That keeps raw events available for audit/backfill, while day-to-day reads stay cheap.
 - Suspicious flags are separate records instead of a boolean on `Property` because a listing can be flagged multiple times over time, by different rules, with different review outcomes.
 - Review actions are also separate records so the decision history is not lost when a flag status changes.
 
@@ -74,8 +84,16 @@ The important indexes are:
   - supports comparables used by the low-price detection rule
 - `PropertyView(propertyId, viewedAt desc)`
   - supports property detail view history
+- `PropertyView(ownerAgentId, viewedAt desc)`
+  - supports agent-scoped analytics without an extra join
 - `PropertyView(viewedAt desc)`
-  - supports dashboard time-series queries
+  - supports backfills and raw event access
+- `AgentDailyStat(agentId, date desc)`
+  - supports fast dashboard time windows
+- `PropertyAnalytics(agentId, lifetimeViewCount desc, lastViewedAt desc)`
+  - supports top viewed properties ranking
+- `PropertyViewDaily(agentId, propertyId, date)` unique
+  - supports per-day drilldown by property
 - `SuspiciousFlag(propertyId, status)`
   - supports fast open-flag lookups for a property
 - `SuspiciousFlag(status, createdAt desc)`
@@ -85,39 +103,49 @@ The important indexes are:
 - `Agent.email` unique
   - supports login
 
-For this challenge scale, Prisma plus targeted indexes is enough. At larger scale, I would start pre-aggregating dashboard metrics and move high-volume analytics off synchronous request paths.
+For the current implementation, I went one step beyond basic indexes and added summary tables so dashboard reads no longer depend on scanning the raw `PropertyView` table for every request.
 
 ## Dashboard Stats and Query Strategy
 
-The dashboard mixes normal Prisma queries with raw SQL where aggregation is clearer or more efficient.
+The dashboard now reads primarily from pre-aggregated analytics tables instead of live event scans. The raw view event table is still kept as the source of truth, but dashboard queries use summaries so the common read path stays fast as data volume grows.
 
 ### `dashboardStats`
 
 This query returns:
 
-- properties by status via `groupBy`
-- total views all time via `propertyView.count`
-- total views this month via filtered `propertyView.count`
-- sold count and revenue for the last 30 days via `property.aggregate`
-- average days to sell via raw SQL over `soldAt - activatedAt`
+- status counts from `AgentDashboardStats`
+- total views all time from `AgentDashboardStats`
+- total views this month from `AgentDailyStat`
+- sold count and revenue for the last 30 days from `AgentDailyStat`
+- average days to sell from cumulative counters in `AgentDashboardStats`
 
-I used raw SQL for average days to sell because date interval math is more direct in PostgreSQL than forcing it through application-side loops.
+Property create, update, delete, confirm-scam, restore, and view-recording flows all keep those aggregates in sync. That moves the work to write time so the dashboard stays cheap to read.
 
 ### `dashboardViewsOverTime`
 
-This uses a raw SQL query grouped by truncated day over `PropertyView`, joined to `Property` so the results are scoped to the logged-in agent. The API accepts a date window and offset so the frontend can paginate 14-day blocks without fetching the full history every time.
+This reads from `AgentDailyStat` for the requested window. The API accepts a date window and offset so the frontend can paginate 14-day blocks without fetching the full history every time.
 
 ### `dashboardViewedPropertiesByDate`
 
-This query groups views by property for one selected day. It exists so the chart can drill into a day and show which properties were viewed, instead of only returning a single chart total.
+This reads from `PropertyViewDaily` for one selected day. It exists so the chart can drill into a day and show which properties were viewed, instead of only returning a single chart total.
 
 ### `topViewedProperties`
 
-This uses a grouped left join from `Property` to `PropertyView` so properties with zero views still remain visible.
+This reads from `PropertyAnalytics`, ordered by lifetime view count and last activity.
+
+### Why This Scales Better
+
+At `100k+` properties per agent, repeated live aggregation over raw events becomes the wrong default. The aggregate design changes the cost profile:
+
+- writes become slightly heavier
+- dashboard reads become predictable and cheap
+- raw event history stays available for backfills and audits
+
+That is the tradeoff I would choose for an agent dashboard, because dashboards are read frequently and need consistent latency.
 
 ## Scam Detection Rules
 
-Detection runs synchronously on property create and update. I chose synchronous execution because:
+Detection runs synchronously on property create and update. I chose synchronous execution for the challenge because:
 
 - the rules are simple enough for the challenge scope
 - the result is immediately visible in the UI
@@ -185,6 +213,31 @@ If I were extending this:
 
 For millions of listings, I would move detection into background jobs, maintain materialized or precomputed market baselines, and push duplicate search into dedicated indexed search structures rather than synchronous relational scans.
 
+## High-Traffic View Tracking
+
+The current implementation already denormalizes `ownerAgentId` onto `PropertyView` and keeps aggregate counters up to date on write. That is a good intermediate step, but the next production step would be queue-based ingestion.
+
+### Queue-Based Ingestion Path
+
+In a higher-traffic system, `recordPropertyView` would change from:
+
+- write raw event
+- update aggregate tables in the same request
+
+to:
+
+- accept the view event quickly
+- publish a compact message to a queue
+- have a worker batch-update `AgentDashboardStats`, `AgentDailyStat`, `PropertyAnalytics`, and `PropertyViewDaily`
+
+Why:
+
+- it keeps public view tracking latency low
+- it prevents traffic spikes from competing with property CRUD or review mutations
+- it allows batched aggregate updates instead of one-row-at-a-time churn
+
+I would still keep the same aggregate tables. The queue changes the ingestion path, not the read model.
+
 ## Frontend Decisions
 
 The UI is optimized around two workflows:
@@ -206,7 +259,7 @@ The dashboard view chart is implemented as a lightweight custom panel instead of
 
 - stronger automated tests around lifecycle transitions and detection rules
 - generated GraphQL types on the frontend instead of hand-maintained query result shapes
-- async detection jobs for larger write volume
+- queue-based view ingestion and async detection jobs for larger write volume
 - more explicit co-listing visibility in the UI
 - richer empty states and success toasts
 

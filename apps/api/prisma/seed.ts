@@ -9,6 +9,8 @@ import bcrypt from 'bcrypt';
 import { config } from 'dotenv';
 import { resolve } from 'node:path';
 
+import { rebuildAgentAnalytics } from '../src/lib/analytics.js';
+
 config({ path: resolve(process.cwd(), '../../.env') });
 config();
 
@@ -308,6 +310,7 @@ const seed = async () => {
       prisma.propertyView.create({
         data: {
           propertyId: property.id,
+          ownerAgentId: property.primaryAgentId,
           viewerType: ViewerType.ANONYMOUS,
           visitorId: `visitor-${propertyIndex}-${viewIndex}`,
           viewedAt: daysAgo((propertyIndex * 3 + viewIndex * 7) % 88 + 1)
@@ -317,6 +320,7 @@ const seed = async () => {
   });
 
   await Promise.all(viewOperations);
+  await Promise.all(createdAgents.map((agent) => rebuildAgentAnalytics(prisma, agent.id)));
 
   const suspiciousSeeds = [
     {
