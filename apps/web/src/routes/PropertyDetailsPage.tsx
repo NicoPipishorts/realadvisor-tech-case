@@ -19,9 +19,20 @@ const PROPERTY_DETAILS_QUERY = gql`
       viewCount
       isFlagged
       flag {
+        id
+        status
         confidenceScore
         primaryReason
         triggeredRule
+        reviewReason
+      }
+      latestFlag {
+        id
+        status
+        confidenceScore
+        primaryReason
+        triggeredRule
+        reviewReason
       }
       viewHistory(limit: 20) {
         id
@@ -36,6 +47,12 @@ const PROPERTY_DETAILS_QUERY = gql`
 const DELETE_PROPERTY_MUTATION = gql`
   mutation DeletePropertyFromDetails($id: ID!) {
     deleteProperty(id: $id)
+  }
+`;
+
+const RESTORE_CONFIRMED_SCAM_MUTATION = gql`
+  mutation RestoreConfirmedScam($flagId: ID!, $reason: String!) {
+    restoreConfirmedScam(flagId: $flagId, reason: $reason)
   }
 `;
 
@@ -55,6 +72,32 @@ const formatDateTime = (value: string) =>
     minute: '2-digit'
   });
 
+const AlertIcon = () => (
+  <svg
+    aria-hidden="true"
+    className="h-4 w-4"
+    fill="none"
+    viewBox="0 0 24 24"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M12 3.75 21 19.5H3L12 3.75Z"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+    />
+    <path
+      d="M12 9v4.5"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+    />
+    <circle cx="12" cy="16.5" r="0.9" fill="currentColor" />
+  </svg>
+);
+
 export const PropertyDetailsPage = () => {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -68,6 +111,13 @@ export const PropertyDetailsPage = () => {
     refetchQueries: ['PropertiesPage', 'DashboardPage'],
     awaitRefetchQueries: true
   });
+  const [restoreConfirmedScam, { loading: restoreLoading }] = useMutation(
+    RESTORE_CONFIRMED_SCAM_MUTATION,
+    {
+      refetchQueries: ['PropertiesPage', 'DashboardPage', 'PropertyDetailsPage'],
+      awaitRefetchQueries: true
+    }
+  );
 
   const handleDelete = async () => {
     if (!data?.property) {
@@ -87,6 +137,28 @@ export const PropertyDetailsPage = () => {
     });
 
     navigate('/properties');
+  };
+
+  const handleRestore = async () => {
+    if (!data?.property.latestFlag?.id) {
+      return;
+    }
+
+    const reason = window.prompt(
+      'Restore listing reason',
+      'Reopened after reviewing the scam confirmation.'
+    );
+
+    if (!reason?.trim()) {
+      return;
+    }
+
+    await restoreConfirmedScam({
+      variables: {
+        flagId: data.property.latestFlag.id,
+        reason
+      }
+    });
   };
 
   if (loading && !data?.property) {
@@ -114,6 +186,9 @@ export const PropertyDetailsPage = () => {
   }
 
   const property = data.property;
+  const latestFlag = property.latestFlag;
+  const canRestoreConfirmedScam = latestFlag?.status === 'CONFIRMED';
+  const displayFlag = property.flag ?? latestFlag;
 
   return (
     <section className="space-y-6">
@@ -148,8 +223,55 @@ export const PropertyDetailsPage = () => {
           >
             Delete
           </button>
+          {canRestoreConfirmedScam ? (
+            <button
+              className="rounded-full border border-pine/20 bg-pine/10 px-5 py-3 text-sm font-semibold text-pine transition hover:bg-pine hover:text-white disabled:opacity-60"
+              disabled={restoreLoading}
+              type="button"
+              onClick={() => void handleRestore()}
+            >
+              Remove scam confirmation
+            </button>
+          ) : null}
         </div>
       </div>
+
+      {displayFlag ? (
+        <section className="rounded-[2rem] border border-amber-200 bg-white/80 p-6 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-3xl">
+              <div className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-800">
+                <AlertIcon />
+                <span>Listing Review</span>
+              </div>
+              <h3 className="mt-2 text-xl font-semibold text-ink">{displayFlag.primaryReason}</h3>
+              <p className="mt-3 text-sm leading-6 text-ink/65">
+                This listing was flagged by the trust review workflow and may need manual attention.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">
+                {displayFlag.status.toLowerCase()}
+              </span>
+              <span className="rounded-full border border-amber-200 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-amber-900">
+                {displayFlag.triggeredRule.replaceAll('_', ' ')}
+              </span>
+              <span className="rounded-full border border-ink/10 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-ink/70">
+                Score {displayFlag.confidenceScore}
+              </span>
+            </div>
+          </div>
+
+          {displayFlag.reviewReason ? (
+            <div className="mt-4 rounded-[1.5rem] border border-ink/10 bg-white/80 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">
+                Review note
+              </p>
+              <p className="mt-2 text-sm text-ink/65">{displayFlag.reviewReason}</p>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
         <section className="rounded-[2rem] border border-ink/10 bg-white/80 p-6 shadow-sm">
@@ -225,6 +347,16 @@ export const PropertyDetailsPage = () => {
                 <p className="mt-2 text-xs uppercase tracking-[0.18em] text-ink/45">
                   {property.flag.triggeredRule.replaceAll('_', ' ')} · {property.flag.confidenceScore}
                 </p>
+              </div>
+            ) : latestFlag ? (
+              <div className="mt-4 rounded-[1.5rem] bg-sand/40 p-4">
+                <p className="text-sm font-semibold text-ink">{latestFlag.primaryReason}</p>
+                <p className="mt-2 text-xs uppercase tracking-[0.18em] text-ink/45">
+                  {latestFlag.triggeredRule.replaceAll('_', ' ')} · {latestFlag.status.toLowerCase()}
+                </p>
+                {latestFlag.reviewReason ? (
+                  <p className="mt-3 text-sm text-ink/60">{latestFlag.reviewReason}</p>
+                ) : null}
               </div>
             ) : (
               <p className="mt-4 text-sm text-ink/60">No suspicious flags are currently open.</p>

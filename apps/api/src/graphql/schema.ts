@@ -18,10 +18,18 @@ export const typeDefs = `#graphql
   }
 
   type DashboardStats {
+    statusBreakdown: [PropertyStatusCount!]!
+    totalViewsAllTime: Int!
     totalActiveProperties: Int!
     totalViewsThisMonth: Int!
     propertiesSoldThisMonth: Int!
+    recentSalesRevenueLast30Days: Float!
     averageDaysToSell: Int!
+  }
+
+  type PropertyStatusCount {
+    status: PropertyStatus!
+    count: Int!
   }
 
   type ViewsByDay {
@@ -29,11 +37,20 @@ export const typeDefs = `#graphql
     views: Int!
   }
 
+  type DailyViewedProperty {
+    id: ID!
+    title: String!
+    status: PropertyStatus!
+    viewCount: Int!
+  }
+
   type PropertyFlag {
     id: ID!
+    status: String!
     confidenceScore: Int!
     primaryReason: String!
     triggeredRule: String!
+    reviewReason: String
   }
 
   type PropertyViewEntry {
@@ -59,6 +76,7 @@ export const typeDefs = `#graphql
     viewCount: Int!
     isFlagged: Boolean!
     flag: PropertyFlag
+    latestFlag: PropertyFlag
     viewHistory(limit: Int = 20): [PropertyViewEntry!]!
   }
 
@@ -67,6 +85,12 @@ export const typeDefs = `#graphql
     title: String!
     status: PropertyStatus!
     viewCount: Int!
+  }
+
+  type DetectionStats {
+    totalFlagged: Int!
+    autoDetected: Int!
+    manuallyReported: Int!
   }
 
   type FlaggedProperty {
@@ -99,11 +123,14 @@ export const typeDefs = `#graphql
     health: String!
     me: Agent
     dashboardStats: DashboardStats!
-    dashboardViewsOverTime(rangeDays: Int = 30): [ViewsByDay!]!
+    dashboardViewsOverTime(rangeDays: Int = 14, offsetDays: Int = 0): [ViewsByDay!]!
+    dashboardViewedPropertiesByDate(date: String!): [DailyViewedProperty!]!
     topViewedProperties(limit: Int = 5): [TopViewedProperty!]!
     flaggedProperties(limit: Int = 5): [FlaggedProperty!]!
+    detectionStats: DetectionStats!
     properties(
       status: PropertyStatus
+      flaggedOnly: Boolean
       fromDate: String
       toDate: String
       page: Int = 1
@@ -117,7 +144,9 @@ export const typeDefs = `#graphql
     createProperty(input: PropertyInput!): Property!
     updateProperty(id: ID!, input: PropertyInput!): Property!
     deleteProperty(id: ID!): Boolean!
+    recordPropertyView(propertyId: ID!, visitorId: String): Boolean!
     dismissFlag(flagId: ID!, reason: String!): Boolean!
     confirmScam(flagId: ID!, reason: String!): Boolean!
+    restoreConfirmedScam(flagId: ID!, reason: String!): Boolean!
   }
 `;

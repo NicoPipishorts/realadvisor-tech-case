@@ -31,6 +31,23 @@ const PROPERTY_QUERY = gql`
       surfaceSqm
       propertyType
       status
+      isFlagged
+      flag {
+        id
+        status
+        confidenceScore
+        primaryReason
+        triggeredRule
+        reviewReason
+      }
+      latestFlag {
+        id
+        status
+        confidenceScore
+        primaryReason
+        triggeredRule
+        reviewReason
+      }
       viewHistory(limit: 20) {
         id
         viewerType
@@ -134,6 +151,32 @@ const formatViewDate = (value: string) =>
     minute: '2-digit'
   });
 
+const AlertIcon = () => (
+  <svg
+    aria-hidden="true"
+    className="h-4 w-4"
+    fill="none"
+    viewBox="0 0 24 24"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <path
+      d="M12 3.75 21 19.5H3L12 3.75Z"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+    />
+    <path
+      d="M12 9v4.5"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+    />
+    <circle cx="12" cy="16.5" r="0.9" fill="currentColor" />
+  </svg>
+);
+
 export const PropertyFormPage = () => {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -173,10 +216,18 @@ export const PropertyFormPage = () => {
     });
   }, [data]);
 
-  const pageTitle = useMemo(
-    () => (isEditMode ? 'Edit property' : 'Add property'),
+  const pageEyebrow = useMemo(
+    () => (isEditMode ? 'Edit Property' : 'Add Property'),
     [isEditMode]
   );
+  const pageTitle = useMemo(() => {
+    if (isEditMode) {
+      return data?.property?.title ?? 'Edit property';
+    }
+
+    return 'Create a new listing';
+  }, [data?.property?.title, isEditMode]);
+  const displayFlag = data?.property ? data.property.flag ?? data.property.latestFlag : null;
 
   const handleChange = <Key extends keyof PropertyFormState>(
     key: Key,
@@ -235,7 +286,9 @@ export const PropertyFormPage = () => {
     <section className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.28em] text-gold">Editor</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.28em] text-gold">
+            {pageEyebrow}
+          </p>
           <h2 className="mt-2 text-3xl font-semibold tracking-tight text-ink">{pageTitle}</h2>
         </div>
         <Link
@@ -245,6 +298,44 @@ export const PropertyFormPage = () => {
           Back to properties
         </Link>
       </div>
+
+      {displayFlag ? (
+        <section className="rounded-[2rem] border border-amber-200 bg-white/80 p-6 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-3xl">
+              <div className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-800">
+                <AlertIcon />
+                <span>Listing Review</span>
+              </div>
+              <h3 className="mt-2 text-xl font-semibold text-ink">{displayFlag.primaryReason}</h3>
+              <p className="mt-3 text-sm leading-6 text-ink/65">
+                Update the listing fields below and save changes to rerun automated detection. If
+                the suspicious signals are removed, the listing will no longer stay flagged.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">
+                {displayFlag.status.toLowerCase()}
+              </span>
+              <span className="rounded-full border border-amber-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-amber-900">
+                {displayFlag.triggeredRule.replaceAll('_', ' ')}
+              </span>
+              <span className="rounded-full border border-ink/10 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-ink/70">
+                Score {displayFlag.confidenceScore}
+              </span>
+            </div>
+          </div>
+
+          {displayFlag.reviewReason ? (
+            <div className="mt-4 rounded-[1.5rem] border border-ink/10 bg-sand/35 px-4 py-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">
+                Review note
+              </p>
+              <p className="mt-2 text-sm text-ink/65">{displayFlag.reviewReason}</p>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="rounded-[2rem] border border-ink/10 bg-white/80 p-6 shadow-sm">
         <div>
