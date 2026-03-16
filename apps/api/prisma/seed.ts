@@ -79,6 +79,7 @@ const streetNames = [
   'Rue des Jardins',
   'Avenue du Parc'
 ] as const;
+const portfolioSize = 24;
 
 const daysAgo = (days: number) => {
   const date = new Date();
@@ -127,7 +128,7 @@ const buildSurface = (propertyType: (typeof propertyTypes)[number], index: numbe
 };
 
 const buildPropertySet = (agent: SeedAgent, agentIndex: number) =>
-  Array.from({ length: 20 }, (_, index) => {
+  Array.from({ length: portfolioSize }, (_, index) => {
     const propertyType = propertyTypes[index % propertyTypes.length];
     const descriptor = descriptors[(index + agentIndex) % descriptors.length];
     const amenity = amenities[(index * 2 + agentIndex) % amenities.length];
@@ -257,8 +258,44 @@ const seed = async () => {
     }),
     prisma.propertyCoListing.create({
       data: {
+        propertyId: propertiesByAgent[0][1].id,
+        agentId: createdAgents[2].id
+      }
+    }),
+    prisma.propertyCoListing.create({
+      data: {
+        propertyId: propertiesByAgent[0][9].id,
+        agentId: createdAgents[2].id
+      }
+    }),
+    prisma.propertyCoListing.create({
+      data: {
+        propertyId: propertiesByAgent[1][6].id,
+        agentId: createdAgents[0].id
+      }
+    }),
+    prisma.propertyCoListing.create({
+      data: {
+        propertyId: propertiesByAgent[1][12].id,
+        agentId: createdAgents[2].id
+      }
+    }),
+    prisma.propertyCoListing.create({
+      data: {
         propertyId: propertiesByAgent[2][3].id,
         agentId: createdAgents[0].id
+      }
+    }),
+    prisma.propertyCoListing.create({
+      data: {
+        propertyId: propertiesByAgent[2][3].id,
+        agentId: createdAgents[1].id
+      }
+    }),
+    prisma.propertyCoListing.create({
+      data: {
+        propertyId: propertiesByAgent[2][14].id,
+        agentId: createdAgents[1].id
       }
     })
   ]);
@@ -318,6 +355,34 @@ const seed = async () => {
       detailsJson: {
         recentHighValueListings: 4
       }
+    },
+    {
+      propertyId: propertiesByAgent[0][11].id,
+      confidenceScore: 83,
+      primaryReason: 'Description uses urgent-payment language and requests off-platform contact.',
+      triggeredRule: 'OFF_PLATFORM_CONTACT_PATTERN',
+      detailsJson: {
+        matchedTerms: ['urgent transfer', 'contact directly', 'reserve today']
+      }
+    },
+    {
+      propertyId: propertiesByAgent[1][15].id,
+      confidenceScore: 71,
+      primaryReason: 'Photos and marketing copy appear reused across unrelated luxury listings.',
+      triggeredRule: 'REUSED_MARKETING_ASSETS',
+      detailsJson: {
+        matchedListingCount: 3
+      }
+    },
+    {
+      propertyId: propertiesByAgent[2][17].id,
+      confidenceScore: 58,
+      primaryReason: 'Flagged manually by agency operations after an identity verification mismatch.',
+      triggeredRule: 'MANUAL_REVIEW_MISMATCH',
+      detailsJson: {
+        sourceNote: 'Agency ops manual report'
+      },
+      source: FlagSource.MANUAL
     }
   ];
 
@@ -327,7 +392,7 @@ const seed = async () => {
         data: {
           propertyId: flag.propertyId,
           status: FlagStatus.OPEN,
-          source: FlagSource.AUTO,
+          source: flag.source ?? FlagSource.AUTO,
           confidenceScore: flag.confidenceScore,
           primaryReason: flag.primaryReason,
           triggeredRule: flag.triggeredRule,
@@ -338,7 +403,7 @@ const seed = async () => {
   );
 
   console.log('Seed complete.');
-  console.log('Seeded 3 agents with 20 properties each and 4 suspicious flags.');
+  console.log('Seeded 3 agents with 24 properties each, 8 co-listing links, and 7 suspicious flags.');
   console.log('Login users:');
   console.log('- alice@realadvisor.local / password123');
   console.log('- julien@realadvisor.local / password123');

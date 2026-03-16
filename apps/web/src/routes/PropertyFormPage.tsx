@@ -74,6 +74,24 @@ const UPDATE_PROPERTY_MUTATION = gql`
   }
 `;
 
+const DISMISS_FLAG_MUTATION = gql`
+  mutation DismissFlagFromEditor($flagId: ID!, $reason: String!) {
+    dismissFlag(flagId: $flagId, reason: $reason)
+  }
+`;
+
+const CONFIRM_SCAM_MUTATION = gql`
+  mutation ConfirmScamFromEditor($flagId: ID!, $reason: String!) {
+    confirmScam(flagId: $flagId, reason: $reason)
+  }
+`;
+
+const RESTORE_CONFIRMED_SCAM_MUTATION = gql`
+  mutation RestoreConfirmedScamFromEditor($flagId: ID!, $reason: String!) {
+    restoreConfirmedScam(flagId: $flagId, reason: $reason)
+  }
+`;
+
 const emptyFormState: PropertyFormState = {
   title: '',
   description: '',
@@ -183,6 +201,14 @@ export const PropertyFormPage = () => {
   const isEditMode = Boolean(id);
   const [formState, setFormState] = useState<PropertyFormState>(emptyFormState);
   const [formError, setFormError] = useState<string | null>(null);
+  const [dismissingFlagId, setDismissingFlagId] = useState<string | null>(null);
+  const [dismissReason, setDismissReason] = useState(
+    'Reviewed manually and determined to be a false positive.'
+  );
+  const [confirmingFlagId, setConfirmingFlagId] = useState<string | null>(null);
+  const [confirmReason, setConfirmReason] = useState(
+    'Confirmed as a scam and archived from the active portfolio.'
+  );
   const { data, loading: queryLoading } = useQuery(PROPERTY_QUERY, {
     variables: { id },
     skip: !id
@@ -195,6 +221,21 @@ export const PropertyFormPage = () => {
     refetchQueries: ['PropertiesPage', 'DashboardPage', 'PropertyFormPage'],
     awaitRefetchQueries: true
   });
+  const [dismissFlag, { loading: dismissing }] = useMutation(DISMISS_FLAG_MUTATION, {
+    refetchQueries: ['PropertiesPage', 'DashboardPage', 'PropertyFormPage'],
+    awaitRefetchQueries: true
+  });
+  const [confirmScam, { loading: confirming }] = useMutation(CONFIRM_SCAM_MUTATION, {
+    refetchQueries: ['PropertiesPage', 'DashboardPage', 'PropertyFormPage'],
+    awaitRefetchQueries: true
+  });
+  const [restoreConfirmedScam, { loading: restoring }] = useMutation(
+    RESTORE_CONFIRMED_SCAM_MUTATION,
+    {
+      refetchQueries: ['PropertiesPage', 'DashboardPage', 'PropertyFormPage'],
+      awaitRefetchQueries: true
+    }
+  );
   const isSaving = createLoading || updateLoading;
 
   useEffect(() => {
@@ -228,6 +269,8 @@ export const PropertyFormPage = () => {
     return 'Create a new listing';
   }, [data?.property?.title, isEditMode]);
   const displayFlag = data?.property ? data.property.flag ?? data.property.latestFlag : null;
+  const openFlag = data?.property?.flag;
+  const confirmedFlag = data?.property?.latestFlag?.status === 'CONFIRMED' ? data.property.latestFlag : null;
 
   const handleChange = <Key extends keyof PropertyFormState>(
     key: Key,
@@ -272,6 +315,51 @@ export const PropertyFormPage = () => {
         mutationError instanceof Error ? mutationError.message : 'Failed to save property.'
       );
     }
+  };
+
+  const handleDismissFlag = async () => {
+    if (!dismissingFlagId || !dismissReason.trim()) {
+      return;
+    }
+
+    await dismissFlag({
+      variables: {
+        flagId: dismissingFlagId,
+        reason: dismissReason
+      }
+    });
+
+    setDismissingFlagId(null);
+    setDismissReason('Reviewed manually and determined to be a false positive.');
+  };
+
+  const handleConfirmScam = async () => {
+    if (!confirmingFlagId || !confirmReason.trim()) {
+      return;
+    }
+
+    await confirmScam({
+      variables: {
+        flagId: confirmingFlagId,
+        reason: confirmReason
+      }
+    });
+
+    setConfirmingFlagId(null);
+    setConfirmReason('Confirmed as a scam and archived from the active portfolio.');
+  };
+
+  const handleRestoreConfirmedScam = async () => {
+    if (!confirmedFlag?.id) {
+      return;
+    }
+
+    await restoreConfirmedScam({
+      variables: {
+        flagId: confirmedFlag.id,
+        reason: 'Reopened after reviewing the scam confirmation.'
+      }
+    });
   };
 
   if (queryLoading) {
@@ -334,6 +422,40 @@ export const PropertyFormPage = () => {
               <p className="mt-2 text-sm text-ink/65">{displayFlag.reviewReason}</p>
             </div>
           ) : null}
+
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            {openFlag ? (
+              <>
+                <button
+                  className="rounded-full border border-ink/10 px-4 py-3 text-sm font-semibold text-ink/70 transition hover:bg-white disabled:opacity-50"
+                  disabled={dismissing || confirming}
+                  type="button"
+                  onClick={() => setDismissingFlagId(openFlag.id)}
+                >
+                  Dismiss flag
+                </button>
+                <button
+                  className="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-pine disabled:opacity-50"
+                  disabled={dismissing || confirming}
+                  type="button"
+                  onClick={() => setConfirmingFlagId(openFlag.id)}
+                >
+                  Confirm scam
+                </button>
+              </>
+            ) : null}
+
+            {confirmedFlag ? (
+              <button
+                className="rounded-full border border-pine/20 bg-pine/10 px-5 py-3 text-sm font-semibold text-pine transition hover:bg-pine hover:text-white disabled:opacity-50"
+                disabled={restoring}
+                type="button"
+                onClick={() => void handleRestoreConfirmedScam()}
+              >
+                {restoring ? 'Restoring...' : 'Remove scam confirmation'}
+              </button>
+            ) : null}
+          </div>
         </section>
       ) : null}
 
@@ -571,6 +693,162 @@ export const PropertyFormPage = () => {
             )}
           </div>
         </section>
+      ) : null}
+
+      {dismissingFlagId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <button
+            aria-label="Close dismiss modal"
+            className="absolute inset-0 bg-ink/30"
+            type="button"
+            onClick={() => {
+              if (dismissing) {
+                return;
+              }
+
+              setDismissingFlagId(null);
+              setDismissReason('Reviewed manually and determined to be a false positive.');
+            }}
+          />
+          <section className="relative w-full max-w-lg rounded-[2rem] border border-ink/10 bg-sand/95 p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.28em] text-gold">
+                  Dismiss Flag
+                </p>
+                <h3 className="mt-2 text-2xl font-semibold tracking-tight text-ink">
+                  Remove this listing from the review queue?
+                </h3>
+                <p className="mt-3 text-sm leading-6 text-ink/65">
+                  Dismissing the flag marks this review as a false positive and removes it from the
+                  open flagged listings queue.
+                </p>
+              </div>
+              <button
+                className="rounded-full border border-ink/10 px-3 py-2 text-sm font-semibold text-ink/60 transition hover:bg-white disabled:opacity-50"
+                disabled={dismissing}
+                type="button"
+                onClick={() => {
+                  setDismissingFlagId(null);
+                  setDismissReason('Reviewed manually and determined to be a false positive.');
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <label className="mt-6 block">
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">
+                Review reason
+              </span>
+              <textarea
+                className="min-h-32 w-full rounded-[1.5rem] border border-ink/10 bg-white/80 px-4 py-3 text-sm text-ink outline-none transition focus:border-pine"
+                value={dismissReason}
+                onChange={(event) => setDismissReason(event.target.value)}
+              />
+            </label>
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                className="rounded-full border border-ink/10 px-4 py-3 text-sm font-semibold text-ink/65 transition hover:bg-white disabled:opacity-50"
+                disabled={dismissing}
+                type="button"
+                onClick={() => {
+                  setDismissingFlagId(null);
+                  setDismissReason('Reviewed manually and determined to be a false positive.');
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-pine disabled:opacity-50"
+                disabled={dismissing || !dismissReason.trim()}
+                type="button"
+                onClick={() => void handleDismissFlag()}
+              >
+                {dismissing ? 'Dismissing...' : 'Dismiss flag'}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {confirmingFlagId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+          <button
+            aria-label="Close confirm-scam modal"
+            className="absolute inset-0 bg-ink/30"
+            type="button"
+            onClick={() => {
+              if (confirming) {
+                return;
+              }
+
+              setConfirmingFlagId(null);
+              setConfirmReason('Confirmed as a scam and archived from the active portfolio.');
+            }}
+          />
+          <section className="relative w-full max-w-lg rounded-[2rem] border border-ink/10 bg-sand/95 p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold uppercase tracking-[0.28em] text-gold">
+                  Confirm Scam
+                </p>
+                <h3 className="mt-2 text-2xl font-semibold tracking-tight text-ink">
+                  Archive this flagged listing?
+                </h3>
+                <p className="mt-3 text-sm leading-6 text-ink/65">
+                  Confirming the scam marks this review as confirmed and moves the property into
+                  the archived state.
+                </p>
+              </div>
+              <button
+                className="rounded-full border border-ink/10 px-3 py-2 text-sm font-semibold text-ink/60 transition hover:bg-white disabled:opacity-50"
+                disabled={confirming}
+                type="button"
+                onClick={() => {
+                  setConfirmingFlagId(null);
+                  setConfirmReason('Confirmed as a scam and archived from the active portfolio.');
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <label className="mt-6 block">
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">
+                Review reason
+              </span>
+              <textarea
+                className="min-h-32 w-full rounded-[1.5rem] border border-ink/10 bg-white/80 px-4 py-3 text-sm text-ink outline-none transition focus:border-pine"
+                value={confirmReason}
+                onChange={(event) => setConfirmReason(event.target.value)}
+              />
+            </label>
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                className="rounded-full border border-ink/10 px-4 py-3 text-sm font-semibold text-ink/65 transition hover:bg-white disabled:opacity-50"
+                disabled={confirming}
+                type="button"
+                onClick={() => {
+                  setConfirmingFlagId(null);
+                  setConfirmReason('Confirmed as a scam and archived from the active portfolio.');
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                className="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-pine disabled:opacity-50"
+                disabled={confirming || !confirmReason.trim()}
+                type="button"
+                onClick={() => void handleConfirmScam()}
+              >
+                {confirming ? 'Confirming...' : 'Confirm scam'}
+              </button>
+            </div>
+          </section>
+        </div>
       ) : null}
     </section>
   );

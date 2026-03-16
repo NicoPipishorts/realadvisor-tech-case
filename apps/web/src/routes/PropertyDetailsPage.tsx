@@ -329,41 +329,6 @@ export const PropertyDetailsPage = () => {
 
         <aside className="space-y-6">
           <section className="rounded-[2rem] border border-ink/10 bg-white/80 p-6 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <h3 className="text-lg font-semibold text-ink">Flag status</h3>
-              {property.isFlagged ? (
-                <span className="rounded-full bg-gold/15 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-gold">
-                  Flagged
-                </span>
-              ) : (
-                <span className="rounded-full bg-pine/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-pine">
-                  Clean
-                </span>
-              )}
-            </div>
-            {property.flag ? (
-              <div className="mt-4 rounded-[1.5rem] bg-sand/40 p-4">
-                <p className="text-sm font-semibold text-ink">{property.flag.primaryReason}</p>
-                <p className="mt-2 text-xs uppercase tracking-[0.18em] text-ink/45">
-                  {property.flag.triggeredRule.replaceAll('_', ' ')} · {property.flag.confidenceScore}
-                </p>
-              </div>
-            ) : latestFlag ? (
-              <div className="mt-4 rounded-[1.5rem] bg-sand/40 p-4">
-                <p className="text-sm font-semibold text-ink">{latestFlag.primaryReason}</p>
-                <p className="mt-2 text-xs uppercase tracking-[0.18em] text-ink/45">
-                  {latestFlag.triggeredRule.replaceAll('_', ' ')} · {latestFlag.status.toLowerCase()}
-                </p>
-                {latestFlag.reviewReason ? (
-                  <p className="mt-3 text-sm text-ink/60">{latestFlag.reviewReason}</p>
-                ) : null}
-              </div>
-            ) : (
-              <p className="mt-4 text-sm text-ink/60">No suspicious flags are currently open.</p>
-            )}
-          </section>
-
-          <section className="rounded-[2rem] border border-ink/10 bg-white/80 p-6 shadow-sm">
             <h3 className="text-lg font-semibold text-ink">Recent views</h3>
             <div className="mt-4 space-y-3">
               {property.viewHistory.length ? (
