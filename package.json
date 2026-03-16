@@ -1,0 +1,18 @@
+{
+  "name": "realadvisor-tech-case",
+  "private": true,
+  "packageManager": "yarn@1.22.22",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"yarn dev:api\" \"yarn dev:web\"",
+    "dev:api": "yarn workspace @realadvisor/api dev",
+    "dev:web": "yarn workspace @realadvisor/web dev",
+    "build": "yarn workspace @realadvisor/api build && yarn workspace @realadvisor/web build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.6.3"
+  }
+}

@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PropertyStatus {
+  DRAFT
+  ACTIVE
+  SOLD
+  ARCHIVED
+}
+
+enum ViewerType {
+  ANONYMOUS
+  AUTHENTICATED
+}
+
+enum FlagStatus {
+  OPEN
+  DISMISSED
+  CONFIRMED
+}
+
+enum FlagSource {
+  AUTO
+  MANUAL
+}
+
+enum FlagReviewActionType {
+  DISMISS
+  CONFIRM
+}
+
+model Agency {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  agents    Agent[]
+}
+
+model Agent {
+  id                  String             @id @default(cuid())
+  agencyId            String
+  name                String
+  email               String             @unique
+  passwordHash        String
+  createdAt           DateTime           @default(now())
+  agency              Agency             @relation(fields: [agencyId], references: [id], onDelete: Restrict)
+  primaryProperties   Property[]         @relation("PrimaryAgentProperties")
+  coListedProperties  PropertyCoListing[]
+  viewedProperties    PropertyView[]
+  reviewedFlags       SuspiciousFlag[]   @relation("ReviewedFlags")
+  flagReviewActions   FlagReviewAction[]
+}
+
+model Property {
+  id              String            @id @default(cuid())
+  primaryAgentId  String
+  title           String
+  description     String
+  addressLine1    String
+  city            String
+  postalCode      String
+  country         String
+  price           Decimal           @db.Decimal(12, 2)
+  surfaceSqm      Decimal           @db.Decimal(10, 2)
+  propertyType    String
+  status          PropertyStatus    @default(DRAFT)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  activatedAt     DateTime?
+  soldAt          DateTime?
+  archivedAt      DateTime?
+  primaryAgent    Agent             @relation("PrimaryAgentProperties", fields: [primaryAgentId], references: [id], onDelete: Cascade)
+  coListings      PropertyCoListing[]
+  views           PropertyView[]
+  suspiciousFlags SuspiciousFlag[]
+
+  @@index([primaryAgentId, status, createdAt(sort: Desc)])
+  @@index([primaryAgentId, soldAt(sort: Desc)])
+  @@index([status, city, propertyType])
+}
+
+model PropertyCoListing {
+  id         String   @id @default(cuid())
+  propertyId String
+  agentId    String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  agent      Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([propertyId, agentId])
+}
+
+model PropertyView {
+  id           String     @id @default(cuid())
+  propertyId   String
+  viewerType   ViewerType
+  viewerAgentId String?
+  visitorId    String?
+  viewedAt     DateTime   @default(now())
+  property     Property   @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  viewerAgent  Agent?     @relation(fields: [viewerAgentId], references: [id], onDelete: SetNull)
+
+  @@index([propertyId, viewedAt(sort: Desc)])
+  @@index([viewedAt(sort: Desc)])
+}
+
+model SuspiciousFlag {
+  id                String             @id @default(cuid())
+  propertyId        String
+  status            FlagStatus         @default(OPEN)
+  source            FlagSource         @default(AUTO)
+  confidenceScore   Int
+  primaryReason     String
+  detailsJson       Json?
+  triggeredRule     String
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  reviewedByAgentId String?
+  reviewedAt        DateTime?
+  reviewReason      String?
+  property          Property           @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  reviewedByAgent   Agent?             @relation("ReviewedFlags", fields: [reviewedByAgentId], references: [id], onDelete: SetNull)
+  reviewActions     FlagReviewAction[]
+
+  @@index([propertyId, status])
+  @@index([status, createdAt(sort: Desc)])
+}
+
+model FlagReviewAction {
+  id        String               @id @default(cuid())
+  flagId     String
+  agentId    String
+  action     FlagReviewActionType
+  reason     String
+  createdAt  DateTime            @default(now())
+  flag       SuspiciousFlag      @relation(fields: [flagId], references: [id], onDelete: Cascade)
+  agent      Agent               @relation(fields: [agentId], references: [id], onDelete: Cascade)
+}
