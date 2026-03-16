@@ -1,5 +1,12 @@
 import { gql, useMutation, useQuery } from '@apollo/client';
+import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
+
+import { PropertyPageHeader } from '../components/property/PropertyPageHeader';
+import { PropertySummaryPanel } from '../components/property/PropertySummaryPanel';
+import { PropertyViewHistorySection } from '../components/property/PropertyViewHistorySection';
+import { ListingReviewCard } from '../components/review/ListingReviewCard';
+import { ReviewActionModal } from '../components/review/ReviewActionModal';
 
 const PROPERTY_DETAILS_QUERY = gql`
   query PropertyDetailsPage($id: ID!) {
@@ -56,51 +63,13 @@ const RESTORE_CONFIRMED_SCAM_MUTATION = gql`
   }
 `;
 
-const formatCurrency = (value: number) =>
-  new Intl.NumberFormat('en-CH', {
-    style: 'currency',
-    currency: 'CHF',
-    maximumFractionDigits: 0
-  }).format(value);
-
-const formatDateTime = (value: string) =>
-  new Date(value).toLocaleString(undefined, {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  });
-
-const AlertIcon = () => (
-  <svg
-    aria-hidden="true"
-    className="h-4 w-4"
-    fill="none"
-    viewBox="0 0 24 24"
-    xmlns="http://www.w3.org/2000/svg"
-  >
-    <path
-      d="M12 3.75 21 19.5H3L12 3.75Z"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.6"
-    />
-    <path
-      d="M12 9v4.5"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.6"
-    />
-    <circle cx="12" cy="16.5" r="0.9" fill="currentColor" />
-  </svg>
-);
-
 export const PropertyDetailsPage = () => {
   const navigate = useNavigate();
   const { id } = useParams();
+  const [restoreReason, setRestoreReason] = useState(
+    'Reopened after reviewing the scam confirmation.'
+  );
+  const [isRestoreModalOpen, setIsRestoreModalOpen] = useState(false);
   const { data, loading, error } = useQuery(PROPERTY_DETAILS_QUERY, {
     variables: { id },
     skip: !id,
@@ -144,21 +113,19 @@ export const PropertyDetailsPage = () => {
       return;
     }
 
-    const reason = window.prompt(
-      'Restore listing reason',
-      'Reopened after reviewing the scam confirmation.'
-    );
-
-    if (!reason?.trim()) {
+    if (!restoreReason.trim()) {
       return;
     }
 
     await restoreConfirmedScam({
       variables: {
         flagId: data.property.latestFlag.id,
-        reason
+        reason: restoreReason
       }
     });
+
+    setIsRestoreModalOpen(false);
+    setRestoreReason('Reopened after reviewing the scam confirmation.');
   };
 
   if (loading && !data?.property) {
@@ -192,176 +159,96 @@ export const PropertyDetailsPage = () => {
 
   return (
     <section className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="max-w-3xl">
-          <p className="text-sm font-semibold uppercase tracking-[0.28em] text-gold">
-            Property Preview
-          </p>
-          <h2 className="mt-2 text-4xl font-semibold tracking-tight text-ink">
-            {property.title}
-          </h2>
-          <p className="mt-3 text-base leading-7 text-ink/70">{property.description}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3 lg:justify-end">
-          <Link
-            className="rounded-full border border-ink/10 px-5 py-3 text-sm font-semibold text-ink transition hover:bg-white"
-            to="/properties"
-          >
-            Back
-          </Link>
-          <Link
-            className="rounded-full border border-ink/10 px-5 py-3 text-sm font-semibold text-ink transition hover:bg-white"
-            to={`/properties/${property.id}/edit`}
-          >
-            Edit
-          </Link>
-          <button
-            className="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60"
-            disabled={deleteLoading}
-            type="button"
-            onClick={() => void handleDelete()}
-          >
-            Delete
-          </button>
-          {canRestoreConfirmedScam ? (
-            <button
-              className="rounded-full border border-pine/20 bg-pine/10 px-5 py-3 text-sm font-semibold text-pine transition hover:bg-pine hover:text-white disabled:opacity-60"
-              disabled={restoreLoading}
-              type="button"
-              onClick={() => void handleRestore()}
+      <PropertyPageHeader
+        actions={
+          <>
+            <Link
+              className="rounded-full border border-ink/10 px-5 py-3 text-sm font-semibold text-ink transition hover:bg-white"
+              to="/properties"
             >
-              Remove scam confirmation
+              Back
+            </Link>
+            <Link
+              className="rounded-full border border-ink/10 px-5 py-3 text-sm font-semibold text-ink transition hover:bg-white"
+              to={`/properties/${property.id}/edit`}
+            >
+              Edit
+            </Link>
+            <button
+              className="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60"
+              disabled={deleteLoading}
+              type="button"
+              onClick={() => void handleDelete()}
+            >
+              Delete
             </button>
-          ) : null}
-        </div>
-      </div>
+            {canRestoreConfirmedScam ? (
+              <button
+                className="rounded-full border border-pine/20 bg-pine/10 px-5 py-3 text-sm font-semibold text-pine transition hover:bg-pine hover:text-white disabled:opacity-60"
+                disabled={restoreLoading}
+                type="button"
+                onClick={() => setIsRestoreModalOpen(true)}
+              >
+                Remove scam confirmation
+              </button>
+            ) : null}
+          </>
+        }
+        description={property.description}
+        eyebrow="Property Preview"
+        title={property.title}
+      />
 
       {displayFlag ? (
-        <section className="rounded-[2rem] border border-amber-200 bg-white/80 p-6 shadow-sm">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="max-w-3xl">
-              <div className="inline-flex items-center gap-2 rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-800">
-                <AlertIcon />
-                <span>Listing Review</span>
-              </div>
-              <h3 className="mt-2 text-xl font-semibold text-ink">{displayFlag.primaryReason}</h3>
-              <p className="mt-3 text-sm leading-6 text-ink/65">
-                This listing was flagged by the trust review workflow and may need manual attention.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-              <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-amber-800">
-                {displayFlag.status.toLowerCase()}
-              </span>
-              <span className="rounded-full border border-amber-200 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-amber-900">
-                {displayFlag.triggeredRule.replaceAll('_', ' ')}
-              </span>
-              <span className="rounded-full border border-ink/10 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-ink/70">
-                Score {displayFlag.confidenceScore}
-              </span>
-            </div>
-          </div>
-
-          {displayFlag.reviewReason ? (
-            <div className="mt-4 rounded-[1.5rem] border border-ink/10 bg-white/80 px-4 py-3">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">
-                Review note
-              </p>
-              <p className="mt-2 text-sm text-ink/65">{displayFlag.reviewReason}</p>
-            </div>
-          ) : null}
-        </section>
+        <ListingReviewCard
+          description="This listing was flagged by the trust review workflow and may need manual attention."
+          flag={displayFlag}
+        />
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
-        <section className="rounded-[2rem] border border-ink/10 bg-white/80 p-6 shadow-sm">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            <article className="rounded-[1.5rem] bg-sand/40 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">
-                Price
-              </p>
-              <p className="mt-2 text-2xl font-semibold text-ink">{formatCurrency(property.price)}</p>
-            </article>
-            <article className="rounded-[1.5rem] bg-sand/40 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">
-                Surface
-              </p>
-              <p className="mt-2 text-2xl font-semibold text-ink">{property.surfaceSqm} sqm</p>
-            </article>
-            <article className="rounded-[1.5rem] bg-sand/40 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">
-                Status
-              </p>
-              <p className="mt-2 text-2xl font-semibold text-ink">
-                {property.status.toLowerCase()}
-              </p>
-            </article>
-            <article className="rounded-[1.5rem] bg-sand/40 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">
-                Type
-              </p>
-              <p className="mt-2 text-xl font-semibold text-ink">{property.propertyType}</p>
-            </article>
-            <article className="rounded-[1.5rem] bg-sand/40 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">
-                Views
-              </p>
-              <p className="mt-2 text-2xl font-semibold text-ink">{property.viewCount}</p>
-            </article>
-            <article className="rounded-[1.5rem] bg-sand/40 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">
-                Created
-              </p>
-              <p className="mt-2 text-lg font-semibold text-ink">{formatDateTime(property.createdAt)}</p>
-            </article>
-          </div>
-
-          <div className="mt-6 rounded-[1.5rem] border border-ink/10 bg-white p-5">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">
-              Address
-            </p>
-            <p className="mt-2 text-lg font-semibold text-ink">{property.addressLine1}</p>
-            <p className="mt-1 text-sm text-ink/65">
-              {property.postalCode} {property.city}, {property.country}
-            </p>
-          </div>
-        </section>
+        <PropertySummaryPanel
+          addressLine1={property.addressLine1}
+          city={property.city}
+          country={property.country}
+          createdAt={property.createdAt}
+          postalCode={property.postalCode}
+          price={property.price}
+          propertyType={property.propertyType}
+          status={property.status}
+          surfaceSqm={property.surfaceSqm}
+          viewCount={property.viewCount}
+        />
 
         <aside className="space-y-6">
-          <section className="rounded-[2rem] border border-ink/10 bg-white/80 p-6 shadow-sm">
-            <h3 className="text-lg font-semibold text-ink">Recent views</h3>
-            <div className="mt-4 space-y-3">
-              {property.viewHistory.length ? (
-                property.viewHistory.map(
-                  (view: {
-                    id: string;
-                    viewerType: string;
-                    visitorId: string | null;
-                    viewedAt: string;
-                  }) => (
-                    <article
-                      key={view.id}
-                      className="rounded-[1.5rem] border border-ink/10 bg-sand/35 px-4 py-3"
-                    >
-                      <p className="text-sm font-semibold text-ink">
-                        {view.viewerType.toLowerCase()}
-                      </p>
-                      <p className="mt-1 text-xs text-ink/50">
-                        {view.visitorId ? `Visitor: ${view.visitorId}` : 'No visitor id'}
-                      </p>
-                      <p className="mt-2 text-sm text-ink/60">{formatDateTime(view.viewedAt)}</p>
-                    </article>
-                  )
-                )
-              ) : (
-                <div className="rounded-[1.5rem] border border-dashed border-ink/15 px-4 py-12 text-center text-sm text-ink/50">
-                  No tracked views yet.
-                </div>
-              )}
-            </div>
-          </section>
+          <PropertyViewHistorySection
+            compact
+            emptyMessage="No tracked views yet."
+            eyebrow="View History"
+            title="Recent listing traffic"
+            views={property.viewHistory}
+          />
         </aside>
       </div>
+
+      {isRestoreModalOpen ? (
+        <ReviewActionModal
+          closeAriaLabel="Close restore-listing modal"
+          confirmLabel="Remove scam confirmation"
+          confirmPendingLabel="Restoring..."
+          description="Restoring this listing removes the confirmed-scam review state and brings the property back into the active workflow."
+          heading="Reopen this archived listing?"
+          isSubmitting={restoreLoading}
+          onChange={setRestoreReason}
+          onClose={() => {
+            setIsRestoreModalOpen(false);
+            setRestoreReason('Reopened after reviewing the scam confirmation.');
+          }}
+          onConfirm={() => void handleRestore()}
+          title="Restore Listing"
+          value={restoreReason}
+        />
+      ) : null}
     </section>
   );
 };
