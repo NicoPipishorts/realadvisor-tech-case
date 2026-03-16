@@ -1,7 +1,8 @@
-import { gql, useQuery } from '@apollo/client';
+import { gql, useMutation, useQuery } from '@apollo/client';
 import { useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 
-const columns = ['Title', 'Price', 'Status', 'Views', 'Created'];
+const columns = ['Title', 'Price', 'Status', 'Views', 'Created', 'Actions'];
 const statuses = [
   { label: 'All', value: null },
   { label: 'Active', value: 'ACTIVE' },
@@ -31,6 +32,12 @@ const PROPERTIES_QUERY = gql`
   }
 `;
 
+const DELETE_PROPERTY_MUTATION = gql`
+  mutation DeleteProperty($id: ID!) {
+    deleteProperty(id: $id)
+  }
+`;
+
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('en-CH', {
     style: 'currency',
@@ -46,6 +53,7 @@ const formatDate = (value: string) =>
   });
 
 export const PropertiesPage = () => {
+  const navigate = useNavigate();
   const [selectedStatus, setSelectedStatus] = useState<(typeof statuses)[number]['value']>(null);
   const [page, setPage] = useState(1);
   const pageSize = 10;
@@ -54,10 +62,29 @@ export const PropertiesPage = () => {
       status: selectedStatus,
       page,
       pageSize
-    }
+    },
+    fetchPolicy: 'cache-and-network',
+    nextFetchPolicy: 'cache-first',
+    notifyOnNetworkStatusChange: true
+  });
+  const [deleteProperty, { loading: deleteLoading }] = useMutation(DELETE_PROPERTY_MUTATION, {
+    refetchQueries: ['PropertiesPage', 'DashboardPage'],
+    awaitRefetchQueries: true
   });
   const totalCount = data?.properties.totalCount ?? 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+  const handleDelete = async (id: string, title: string) => {
+    const confirmed = window.confirm(`Delete "${title}"? This action cannot be undone.`);
+
+    if (!confirmed) {
+      return;
+    }
+
+    await deleteProperty({
+      variables: { id }
+    });
+  };
 
   return (
     <section className="space-y-6">
@@ -70,7 +97,11 @@ export const PropertiesPage = () => {
             Manage portfolio inventory.
           </h2>
         </div>
-        <button className="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-pine">
+        <button
+          className="rounded-full bg-ink px-5 py-3 text-sm font-semibold text-white transition hover:bg-pine"
+          type="button"
+          onClick={() => navigate('/properties/new')}
+        >
           Add property
         </button>
       </div>
@@ -139,7 +170,11 @@ export const PropertiesPage = () => {
                     isFlagged: boolean;
                     flag: null | { confidenceScore: number; primaryReason: string };
                   }) => (
-                    <tr key={property.id} className="bg-sand/35">
+                    <tr
+                      key={property.id}
+                      className="cursor-pointer bg-sand/35 transition hover:bg-sand/55"
+                      onClick={() => navigate(`/properties/${property.id}`)}
+                    >
                       <td className="rounded-l-2xl px-4 py-4">
                         <div className="flex items-center gap-3">
                           <span className="font-medium text-ink">{property.title}</span>
@@ -156,8 +191,30 @@ export const PropertiesPage = () => {
                       <td className="px-4 py-4 text-sm text-ink/70">{formatCurrency(property.price)}</td>
                       <td className="px-4 py-4 text-sm text-ink/70">{property.status.toLowerCase()}</td>
                       <td className="px-4 py-4 text-sm font-semibold text-ink">{property.viewCount}</td>
-                      <td className="rounded-r-2xl px-4 py-4 text-sm text-ink/60">
+                      <td className="px-4 py-4 text-sm text-ink/60">
                         {formatDate(property.createdAt)}
+                      </td>
+                      <td className="rounded-r-2xl px-4 py-4">
+                        <div className="flex items-center gap-2">
+                          <Link
+                            className="rounded-full border border-ink/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-ink/60 transition hover:bg-white"
+                            to={`/properties/${property.id}/edit`}
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            Edit
+                          </Link>
+                          <button
+                            className="rounded-full border border-red-200 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-red-700 transition hover:bg-red-50 disabled:opacity-60"
+                            disabled={deleteLoading}
+                            type="button"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              void handleDelete(property.id, property.title);
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   )

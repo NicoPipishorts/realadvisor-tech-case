@@ -1,10 +1,13 @@
 import {
+  FlagReviewActionType,
   FlagStatus,
   Prisma,
   PropertyStatus as PrismaPropertyStatus,
-  type SuspiciousFlag,
-  type Property
+  type Property,
+  type PropertyView,
+  type SuspiciousFlag
 } from '@prisma/client';
+import { z } from 'zod';
 
 import type { Context } from '../../context.js';
 import { requireAgentId, signAgentToken, verifyPassword } from '../../lib/auth.js';
@@ -30,11 +33,75 @@ type ListArgs = {
   limit?: number;
 };
 
+type PropertyArgs = {
+  id: string;
+};
+
+type PropertyInputArgs = {
+  input: {
+    title: string;
+    description: string;
+    addressLine1: string;
+    city: string;
+    postalCode: string;
+    country: string;
+    price: number;
+    surfaceSqm: number;
+    propertyType: string;
+    status: PrismaPropertyStatus;
+  };
+};
+
+type UpdatePropertyArgs = PropertyArgs & PropertyInputArgs;
+
 type PropertyWithRelations = Property & {
   _count: {
     views: number;
   };
-  suspiciousFlags: Array<Pick<SuspiciousFlag, 'id' | 'confidenceScore' | 'primaryReason' | 'triggeredRule'>>;
+  suspiciousFlags: Array<
+    Pick<SuspiciousFlag, 'id' | 'confidenceScore' | 'primaryReason' | 'triggeredRule'>
+  >;
+};
+
+type ViewHistoryArgs = {
+  limit?: number;
+};
+
+type FlagActionArgs = {
+  flagId: string;
+  reason: string;
+};
+
+const propertyInputSchema = z.object({
+  title: z.string().trim().min(3).max(120),
+  description: z.string().trim().min(10).max(2000),
+  addressLine1: z.string().trim().min(3).max(140),
+  city: z.string().trim().min(2).max(80),
+  postalCode: z.string().trim().min(2).max(20),
+  country: z.string().trim().min(2).max(80),
+  price: z.number().positive(),
+  surfaceSqm: z.number().positive(),
+  propertyType: z.string().trim().min(2).max(40),
+  status: z.nativeEnum(PrismaPropertyStatus)
+});
+
+const propertyInclude = {
+  _count: {
+    select: {
+      views: true
+    }
+  },
+  suspiciousFlags: {
+    where: { status: FlagStatus.OPEN },
+    orderBy: { createdAt: 'desc' as const },
+    take: 1,
+    select: {
+      id: true,
+      confidenceScore: true,
+      primaryReason: true,
+      triggeredRule: true
+    }
+  }
 };
 
 const startOfCurrentMonth = () => {
@@ -58,13 +125,51 @@ const parseOptionalDate = (value?: string | null) => {
   return Number.isNaN(date.getTime()) ? undefined : date;
 };
 
+const buildLifecycleTimestamps = (status: PrismaPropertyStatus, existing?: Property | null) => {
+  const now = new Date();
+
+  switch (status) {
+    case PrismaPropertyStatus.DRAFT:
+      return {
+        activatedAt: null,
+        soldAt: null,
+        archivedAt: null
+      };
+    case PrismaPropertyStatus.ACTIVE:
+      return {
+        activatedAt: existing?.activatedAt ?? now,
+        soldAt: null,
+        archivedAt: null
+      };
+    case PrismaPropertyStatus.SOLD:
+      return {
+        activatedAt: existing?.activatedAt ?? now,
+        soldAt: existing?.soldAt ?? now,
+        archivedAt: null
+      };
+    case PrismaPropertyStatus.ARCHIVED:
+      return {
+        activatedAt: existing?.activatedAt ?? null,
+        soldAt: existing?.soldAt ?? null,
+        archivedAt: existing?.archivedAt ?? now
+      };
+  }
+};
+
 const mapProperty = (property: PropertyWithRelations) => {
   const [flag] = property.suspiciousFlags;
 
   return {
     id: property.id,
     title: property.title,
+    description: property.description,
+    addressLine1: property.addressLine1,
+    city: property.city,
+    postalCode: property.postalCode,
+    country: property.country,
     price: Number(property.price),
+    surfaceSqm: Number(property.surfaceSqm),
+    propertyType: property.propertyType,
     status: property.status,
     createdAt: property.createdAt.toISOString(),
     viewCount: property._count.views,
@@ -73,7 +178,56 @@ const mapProperty = (property: PropertyWithRelations) => {
   };
 };
 
+const getOwnedProperty = async (context: Context, id: string) => {
+  const agentId = requireAgentId(context);
+
+  return context.prisma.property.findFirst({
+    where: {
+      id,
+      primaryAgentId: agentId
+    }
+  });
+};
+
+const getOwnedOpenFlag = async (context: Context, flagId: string) => {
+  const agentId = requireAgentId(context);
+
+  return context.prisma.suspiciousFlag.findFirst({
+    where: {
+      id: flagId,
+      status: FlagStatus.OPEN,
+      property: {
+        primaryAgentId: agentId
+      }
+    },
+    include: {
+      property: true
+    }
+  });
+};
+
 export const resolvers = {
+  Property: {
+    viewHistory: async (
+      property: { id: string },
+      args: ViewHistoryArgs,
+      context: Context
+    ) => {
+      const limit = Math.max(1, Math.min(args.limit ?? 20, 100));
+      const views = await context.prisma.propertyView.findMany({
+        where: { propertyId: property.id },
+        orderBy: { viewedAt: 'desc' },
+        take: limit
+      });
+
+      return views.map((view: PropertyView) => ({
+        id: view.id,
+        viewerType: view.viewerType,
+        visitorId: view.visitorId,
+        viewedAt: view.viewedAt.toISOString()
+      }));
+    }
+  },
   Query: {
     health: () => 'ok',
     me: async (_parent: unknown, _args: unknown, context: Context) => {
@@ -190,24 +344,7 @@ export const resolvers = {
         take: limit,
         include: {
           property: {
-            include: {
-              _count: {
-                select: {
-                  views: true
-                }
-              },
-              suspiciousFlags: {
-                where: { status: FlagStatus.OPEN },
-                orderBy: { createdAt: 'desc' },
-                take: 1,
-                select: {
-                  id: true,
-                  confidenceScore: true,
-                  primaryReason: true,
-                  triggeredRule: true
-                }
-              }
-            }
+            include: propertyInclude
           }
         }
       });
@@ -249,24 +386,7 @@ export const resolvers = {
           orderBy: { createdAt: 'desc' },
           skip: (page - 1) * pageSize,
           take: pageSize,
-          include: {
-            _count: {
-              select: {
-                views: true
-              }
-            },
-            suspiciousFlags: {
-              where: { status: FlagStatus.OPEN },
-              orderBy: { createdAt: 'desc' },
-              take: 1,
-              select: {
-                id: true,
-                confidenceScore: true,
-                primaryReason: true,
-                triggeredRule: true
-              }
-            }
-          }
+          include: propertyInclude
         })
       ]);
 
@@ -274,6 +394,18 @@ export const resolvers = {
         totalCount,
         nodes: nodes.map((property) => mapProperty(property as PropertyWithRelations))
       };
+    },
+    property: async (_parent: unknown, args: PropertyArgs, context: Context) => {
+      const agentId = requireAgentId(context);
+      const property = await context.prisma.property.findFirst({
+        where: {
+          id: args.id,
+          primaryAgentId: agentId
+        },
+        include: propertyInclude
+      });
+
+      return property ? mapProperty(property as PropertyWithRelations) : null;
     }
   },
   Mutation: {
@@ -296,6 +428,119 @@ export const resolvers = {
         token: signAgentToken(agent.id),
         agent
       };
+    },
+    createProperty: async (_parent: unknown, args: PropertyInputArgs, context: Context) => {
+      const agentId = requireAgentId(context);
+      const input = propertyInputSchema.parse(args.input);
+      const property = await context.prisma.property.create({
+        data: {
+          primaryAgentId: agentId,
+          ...input,
+          ...buildLifecycleTimestamps(input.status)
+        },
+        include: propertyInclude
+      });
+
+      return mapProperty(property as PropertyWithRelations);
+    },
+    updateProperty: async (_parent: unknown, args: UpdatePropertyArgs, context: Context) => {
+      const existingProperty = await getOwnedProperty(context, args.id);
+
+      if (!existingProperty) {
+        throw new Error('Property not found.');
+      }
+
+      const input = propertyInputSchema.parse(args.input);
+      const property = await context.prisma.property.update({
+        where: { id: existingProperty.id },
+        data: {
+          ...input,
+          ...buildLifecycleTimestamps(input.status, existingProperty)
+        },
+        include: propertyInclude
+      });
+
+      return mapProperty(property as PropertyWithRelations);
+    },
+    deleteProperty: async (_parent: unknown, args: PropertyArgs, context: Context) => {
+      const existingProperty = await getOwnedProperty(context, args.id);
+
+      if (!existingProperty) {
+        throw new Error('Property not found.');
+      }
+
+      await context.prisma.property.delete({
+        where: { id: existingProperty.id }
+      });
+
+      return true;
+    },
+    dismissFlag: async (_parent: unknown, args: FlagActionArgs, context: Context) => {
+      const agentId = requireAgentId(context);
+      const flag = await getOwnedOpenFlag(context, args.flagId);
+
+      if (!flag) {
+        throw new Error('Flag not found.');
+      }
+
+      await context.prisma.$transaction([
+        context.prisma.suspiciousFlag.update({
+          where: { id: flag.id },
+          data: {
+            status: FlagStatus.DISMISSED,
+            reviewedByAgentId: agentId,
+            reviewedAt: new Date(),
+            reviewReason: args.reason
+          }
+        }),
+        context.prisma.flagReviewAction.create({
+          data: {
+            flagId: flag.id,
+            agentId,
+            action: FlagReviewActionType.DISMISS,
+            reason: args.reason
+          }
+        })
+      ]);
+
+      return true;
+    },
+    confirmScam: async (_parent: unknown, args: FlagActionArgs, context: Context) => {
+      const agentId = requireAgentId(context);
+      const flag = await getOwnedOpenFlag(context, args.flagId);
+
+      if (!flag) {
+        throw new Error('Flag not found.');
+      }
+
+      await context.prisma.$transaction([
+        context.prisma.suspiciousFlag.update({
+          where: { id: flag.id },
+          data: {
+            status: FlagStatus.CONFIRMED,
+            reviewedByAgentId: agentId,
+            reviewedAt: new Date(),
+            reviewReason: args.reason
+          }
+        }),
+        context.prisma.flagReviewAction.create({
+          data: {
+            flagId: flag.id,
+            agentId,
+            action: FlagReviewActionType.CONFIRM,
+            reason: args.reason
+          }
+        }),
+        context.prisma.property.update({
+          where: { id: flag.propertyId },
+          data: {
+            status: PrismaPropertyStatus.ARCHIVED,
+            archivedAt: new Date()
+          }
+        })
+      ]);
+
+      return true;
     }
   }
 };

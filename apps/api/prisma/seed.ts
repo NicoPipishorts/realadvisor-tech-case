@@ -1,6 +1,12 @@
+import {
+  FlagSource,
+  FlagStatus,
+  PrismaClient,
+  PropertyStatus,
+  ViewerType
+} from '@prisma/client';
 import bcrypt from 'bcrypt';
 import { config } from 'dotenv';
-import { PrismaClient, PropertyStatus, ViewerType, FlagSource, FlagStatus } from '@prisma/client';
 import { resolve } from 'node:path';
 
 config({ path: resolve(process.cwd(), '../../.env') });
@@ -8,70 +14,70 @@ config();
 
 const prisma = new PrismaClient();
 
-const properties = [
+type SeedAgent = {
+  name: string;
+  email: string;
+  city: string;
+  agencyKey: 'alpine' | 'lakeside';
+};
+
+const agents: SeedAgent[] = [
   {
-    title: 'Bright family apartment near the lake',
-    description: 'Three-bedroom apartment with renovated kitchen and open living area.',
-    addressLine1: '12 Rue du Lac',
+    name: 'Alice Martin',
+    email: 'alice@realadvisor.local',
     city: 'Lausanne',
-    postalCode: '1007',
-    country: 'Switzerland',
-    price: '1350000',
-    surfaceSqm: '112',
-    propertyType: 'apartment',
-    status: PropertyStatus.ACTIVE
+    agencyKey: 'alpine'
   },
   {
-    title: 'Townhouse with private garden',
-    description: 'Spacious townhouse with garden and two covered parking spots.',
-    addressLine1: '8 Chemin des Fleurs',
-    city: 'Lausanne',
-    postalCode: '1010',
-    country: 'Switzerland',
-    price: '1680000',
-    surfaceSqm: '154',
-    propertyType: 'house',
-    status: PropertyStatus.SOLD,
-    soldAtOffsetDays: 8,
-    activatedAtOffsetDays: 42
-  },
-  {
-    title: 'Modern city studio',
-    description: 'Compact studio with balcony, ideal for first-time buyers.',
-    addressLine1: '4 Rue Centrale',
+    name: 'Julien Morel',
+    email: 'julien@realadvisor.local',
     city: 'Geneva',
-    postalCode: '1201',
-    country: 'Switzerland',
-    price: '620000',
-    surfaceSqm: '43',
-    propertyType: 'apartment',
-    status: PropertyStatus.ACTIVE
+    agencyKey: 'alpine'
   },
   {
-    title: 'Luxury villa with panoramic views',
-    description: 'High-end villa with pool, terrace, and unobstructed lake view.',
-    addressLine1: '19 Avenue des Alpes',
-    city: 'Geneva',
-    postalCode: '1207',
-    country: 'Switzerland',
-    price: '3200000',
-    surfaceSqm: '240',
-    propertyType: 'house',
-    status: PropertyStatus.DRAFT
-  },
-  {
-    title: 'Underpriced penthouse opportunity',
-    description: 'Premium penthouse listed well below market with urgent sale messaging.',
-    addressLine1: '55 Quai du Mont',
-    city: 'Geneva',
-    postalCode: '1204',
-    country: 'Switzerland',
-    price: '450000',
-    surfaceSqm: '140',
-    propertyType: 'apartment',
-    status: PropertyStatus.ACTIVE,
-    suspicious: true
+    name: 'Sophie Keller',
+    email: 'sophie@realadvisor.local',
+    city: 'Montreux',
+    agencyKey: 'lakeside'
   }
+];
+
+const propertyTypes = ['apartment', 'house', 'villa', 'loft', 'studio'] as const;
+const descriptors = [
+  'Bright',
+  'Refined',
+  'Panoramic',
+  'Elegant',
+  'Modern',
+  'Quiet',
+  'Renovated',
+  'Sunlit',
+  'Premium',
+  'Charming'
+] as const;
+const amenities = [
+  'terrace',
+  'lake view',
+  'garden',
+  'parking',
+  'home office',
+  'renovated kitchen',
+  'balcony',
+  'double living room',
+  'private cellar',
+  'south-facing windows'
+] as const;
+const streetNames = [
+  'Rue du Lac',
+  'Avenue des Alpes',
+  'Chemin des Fleurs',
+  'Rue du Centre',
+  'Quai des Roses',
+  'Chemin du Midi',
+  'Avenue de la Gare',
+  'Route des Vignes',
+  'Rue des Jardins',
+  'Avenue du Parc'
 ] as const;
 
 const daysAgo = (days: number) => {
@@ -79,6 +85,77 @@ const daysAgo = (days: number) => {
   date.setDate(date.getDate() - days);
   return date;
 };
+
+const buildStatus = (index: number) => {
+  if (index % 10 === 0) {
+    return PropertyStatus.SOLD;
+  }
+
+  if (index % 7 === 0) {
+    return PropertyStatus.ARCHIVED;
+  }
+
+  if (index % 5 === 0) {
+    return PropertyStatus.DRAFT;
+  }
+
+  return PropertyStatus.ACTIVE;
+};
+
+const buildPrice = (propertyType: (typeof propertyTypes)[number], index: number) => {
+  const baseByType = {
+    apartment: 780000,
+    house: 1450000,
+    villa: 2650000,
+    loft: 1180000,
+    studio: 520000
+  };
+
+  return String(baseByType[propertyType] + index * 18500);
+};
+
+const buildSurface = (propertyType: (typeof propertyTypes)[number], index: number) => {
+  const baseByType = {
+    apartment: 82,
+    house: 148,
+    villa: 228,
+    loft: 116,
+    studio: 39
+  };
+
+  return String(baseByType[propertyType] + (index % 4) * 9);
+};
+
+const buildPropertySet = (agent: SeedAgent, agentIndex: number) =>
+  Array.from({ length: 20 }, (_, index) => {
+    const propertyType = propertyTypes[index % propertyTypes.length];
+    const descriptor = descriptors[(index + agentIndex) % descriptors.length];
+    const amenity = amenities[(index * 2 + agentIndex) % amenities.length];
+    const streetName = streetNames[(index + agentIndex * 3) % streetNames.length];
+    const status = buildStatus(index);
+    const createdDaysAgo = 92 - index * 3 - agentIndex * 2;
+    const activatedDaysAgo =
+      status === PropertyStatus.DRAFT ? null : Math.max(createdDaysAgo - 5, 1);
+    const soldDaysAgo =
+      status === PropertyStatus.SOLD ? Math.max((activatedDaysAgo ?? 25) - 18, 1) : null;
+
+    return {
+      title: `${descriptor} ${propertyType} in ${agent.city}`,
+      description: `${descriptor} ${propertyType} with ${amenity} in ${agent.city}. Well suited for buyers looking for a balanced mix of location, comfort, and long-term value.`,
+      addressLine1: `${12 + index} ${streetName}`,
+      city: agent.city,
+      postalCode: `${1000 + agentIndex * 100 + index}`,
+      country: 'Switzerland',
+      price: buildPrice(propertyType, index),
+      surfaceSqm: buildSurface(propertyType, index),
+      propertyType,
+      status,
+      createdAt: daysAgo(createdDaysAgo),
+      activatedAt: activatedDaysAgo ? daysAgo(activatedDaysAgo) : null,
+      soldAt: soldDaysAgo ? daysAgo(soldDaysAgo) : null,
+      archivedAt: status === PropertyStatus.ARCHIVED ? daysAgo(Math.max(createdDaysAgo - 12, 1)) : null
+    };
+  });
 
 const seed = async () => {
   await prisma.flagReviewAction.deleteMany();
@@ -91,109 +168,177 @@ const seed = async () => {
 
   const passwordHash = await bcrypt.hash('password123', 10);
 
-  const [agencyOne, agencyTwo] = await Promise.all([
-    prisma.agency.create({ data: { name: 'Alpine Realty' } }),
-    prisma.agency.create({ data: { name: 'Lakeside Estates' } })
-  ]);
+  const agencyMap = {
+    alpine: await prisma.agency.create({ data: { name: 'Alpine Realty' } }),
+    lakeside: await prisma.agency.create({ data: { name: 'Lakeside Estates' } })
+  };
 
-  const [agentOne, agentTwo, agentThree] = await Promise.all([
-    prisma.agent.create({
-      data: {
-        agencyId: agencyOne.id,
-        name: 'Alice Martin',
-        email: 'alice@realadvisor.local',
-        passwordHash
-      }
-    }),
-    prisma.agent.create({
-      data: {
-        agencyId: agencyOne.id,
-        name: 'Julien Morel',
-        email: 'julien@realadvisor.local',
-        passwordHash
-      }
-    }),
-    prisma.agent.create({
-      data: {
-        agencyId: agencyTwo.id,
-        name: 'Sophie Keller',
-        email: 'sophie@realadvisor.local',
-        passwordHash
-      }
-    })
-  ]);
-
-  const createdProperties = await Promise.all(
-    properties.map((property, index) => {
-      const primaryAgentId =
-        index % 3 === 0 ? agentOne.id : index % 3 === 1 ? agentTwo.id : agentThree.id;
-
-      return prisma.property.create({
+  const createdAgents = await Promise.all(
+    agents.map((agent) =>
+      prisma.agent.create({
         data: {
-          primaryAgentId,
-          title: property.title,
-          description: property.description,
-          addressLine1: property.addressLine1,
-          city: property.city,
-          postalCode: property.postalCode,
-          country: property.country,
-          price: property.price,
-          surfaceSqm: property.surfaceSqm,
-          propertyType: property.propertyType,
-          status: property.status,
-          createdAt: daysAgo(50 - index * 4),
-          activatedAt:
-            property.status === PropertyStatus.DRAFT ? null : daysAgo(property.activatedAtOffsetDays ?? 30 - index * 2),
-          soldAt:
-            property.status === PropertyStatus.SOLD ? daysAgo(property.soldAtOffsetDays ?? 5) : null
-        }
-      });
-    })
-  );
-
-  await Promise.all(
-    createdProperties.flatMap((property, index) => [
-      prisma.propertyView.create({
-        data: {
-          propertyId: property.id,
-          viewerType: ViewerType.ANONYMOUS,
-          visitorId: `visitor-${index}-1`,
-          viewedAt: daysAgo(2 + index)
-        }
-      }),
-      prisma.propertyView.create({
-        data: {
-          propertyId: property.id,
-          viewerType: ViewerType.ANONYMOUS,
-          visitorId: `visitor-${index}-2`,
-          viewedAt: daysAgo(12 + index)
+          agencyId: agencyMap[agent.agencyKey].id,
+          name: agent.name,
+          email: agent.email,
+          passwordHash
         }
       })
-    ])
+    )
   );
 
-  const suspiciousProperty = createdProperties.find((property) =>
-    property.title.includes('Underpriced penthouse opportunity')
-  );
+  const propertiesByAgent = await Promise.all(
+    createdAgents.map(async (agent, agentIndex) => {
+      const portfolio = buildPropertySet(agents[agentIndex], agentIndex);
+      const createdProperties = [];
 
-  if (suspiciousProperty) {
-    await prisma.suspiciousFlag.create({
-      data: {
-        propertyId: suspiciousProperty.id,
-        status: FlagStatus.OPEN,
-        source: FlagSource.AUTO,
-        confidenceScore: 88,
-        primaryReason: 'Price per sqm is far below similar Geneva apartment listings.',
-        triggeredRule: 'LOW_PRICE_PER_SQM',
-        detailsJson: {
-          baselinePricePerSqm: 15000,
-          propertyPricePerSqm: 3214
-        }
+      for (const property of portfolio) {
+        const createdProperty = await prisma.property.create({
+          data: {
+            primaryAgentId: agent.id,
+            ...property
+          }
+        });
+
+        createdProperties.push(createdProperty);
       }
-    });
-  }
+
+      return createdProperties;
+    })
+  );
+
+  await prisma.property.update({
+    where: { id: propertiesByAgent[0][2].id },
+    data: {
+      title: 'Underpriced penthouse opportunity',
+      description:
+        'Premium penthouse listed below market with urgent sale language and unusually low price per sqm.',
+      addressLine1: '55 Quai du Mont',
+      city: 'Lausanne',
+      postalCode: '1006',
+      price: '450000',
+      surfaceSqm: '140',
+      propertyType: 'apartment',
+      status: PropertyStatus.ACTIVE
+    }
+  });
+
+  await prisma.property.update({
+    where: { id: propertiesByAgent[1][4].id },
+    data: {
+      title: 'Lakefront apartment investment deal',
+      description:
+        'Bright apartment with lakefront positioning, private cellar, and immediate investor upside.',
+      addressLine1: '18 Rue du Lac',
+      city: 'Geneva',
+      postalCode: '1204',
+      status: PropertyStatus.ACTIVE
+    }
+  });
+
+  await prisma.property.update({
+    where: { id: propertiesByAgent[2][5].id },
+    data: {
+      title: 'Lakefront apartment investment deal',
+      description:
+        'Bright apartment with lakefront positioning, private cellar, and immediate investor upside.',
+      addressLine1: '18 Rue du Lac',
+      city: 'Montreux',
+      postalCode: '1820',
+      status: PropertyStatus.ACTIVE
+    }
+  });
+
+  await Promise.all([
+    prisma.propertyCoListing.create({
+      data: {
+        propertyId: propertiesByAgent[0][1].id,
+        agentId: createdAgents[1].id
+      }
+    }),
+    prisma.propertyCoListing.create({
+      data: {
+        propertyId: propertiesByAgent[2][3].id,
+        agentId: createdAgents[0].id
+      }
+    })
+  ]);
+
+  const allProperties = propertiesByAgent.flat();
+  const viewOperations = allProperties.flatMap((property, propertyIndex) => {
+    const totalViews = 4 + (propertyIndex % 6);
+
+    return Array.from({ length: totalViews }, (_, viewIndex) =>
+      prisma.propertyView.create({
+        data: {
+          propertyId: property.id,
+          viewerType: ViewerType.ANONYMOUS,
+          visitorId: `visitor-${propertyIndex}-${viewIndex}`,
+          viewedAt: daysAgo((propertyIndex * 3 + viewIndex * 7) % 88 + 1)
+        }
+      })
+    );
+  });
+
+  await Promise.all(viewOperations);
+
+  const suspiciousSeeds = [
+    {
+      propertyId: propertiesByAgent[0][2].id,
+      confidenceScore: 91,
+      primaryReason: 'Price per sqm is far below similar Lausanne apartment listings.',
+      triggeredRule: 'LOW_PRICE_PER_SQM',
+      detailsJson: {
+        baselinePricePerSqm: 13200,
+        propertyPricePerSqm: 3214
+      }
+    },
+    {
+      propertyId: propertiesByAgent[1][4].id,
+      confidenceScore: 78,
+      primaryReason: 'Very similar title and description appear under a different agent.',
+      triggeredRule: 'CROSS_AGENT_DUPLICATE',
+      detailsJson: {
+        matchedPropertyId: propertiesByAgent[2][5].id
+      }
+    },
+    {
+      propertyId: propertiesByAgent[2][5].id,
+      confidenceScore: 74,
+      primaryReason: 'Listing content overlaps with another active listing from a different agent.',
+      triggeredRule: 'CROSS_AGENT_DUPLICATE',
+      detailsJson: {
+        matchedPropertyId: propertiesByAgent[1][4].id
+      }
+    },
+    {
+      propertyId: propertiesByAgent[2][8].id,
+      confidenceScore: 66,
+      primaryReason: 'High-value listing posted unusually quickly within a new portfolio.',
+      triggeredRule: 'NEW_AGENT_HIGH_VALUE_PATTERN',
+      detailsJson: {
+        recentHighValueListings: 4
+      }
+    }
+  ];
+
+  await Promise.all(
+    suspiciousSeeds.map((flag) =>
+      prisma.suspiciousFlag.create({
+        data: {
+          propertyId: flag.propertyId,
+          status: FlagStatus.OPEN,
+          source: FlagSource.AUTO,
+          confidenceScore: flag.confidenceScore,
+          primaryReason: flag.primaryReason,
+          triggeredRule: flag.triggeredRule,
+          detailsJson: flag.detailsJson
+        }
+      })
+    )
+  );
 
   console.log('Seed complete.');
+  console.log('Seeded 3 agents with 20 properties each and 4 suspicious flags.');
   console.log('Login users:');
   console.log('- alice@realadvisor.local / password123');
   console.log('- julien@realadvisor.local / password123');

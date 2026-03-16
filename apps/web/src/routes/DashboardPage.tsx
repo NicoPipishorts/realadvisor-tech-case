@@ -1,4 +1,4 @@
-import { gql, useQuery } from '@apollo/client';
+import { gql, useMutation, useQuery } from '@apollo/client';
 
 const DASHBOARD_QUERY = gql`
   query DashboardPage {
@@ -32,6 +32,18 @@ const DASHBOARD_QUERY = gql`
   }
 `;
 
+const DISMISS_FLAG_MUTATION = gql`
+  mutation DismissFlag($flagId: ID!, $reason: String!) {
+    dismissFlag(flagId: $flagId, reason: $reason)
+  }
+`;
+
+const CONFIRM_SCAM_MUTATION = gql`
+  mutation ConfirmScam($flagId: ID!, $reason: String!) {
+    confirmScam(flagId: $flagId, reason: $reason)
+  }
+`;
+
 const formatShortDate = (value: string) =>
   new Date(value).toLocaleDateString(undefined, {
     month: 'short',
@@ -39,7 +51,15 @@ const formatShortDate = (value: string) =>
   });
 
 export const DashboardPage = () => {
-  const { data, loading, error } = useQuery(DASHBOARD_QUERY);
+  const { data, loading, error, refetch } = useQuery(DASHBOARD_QUERY);
+  const [dismissFlag, { loading: dismissing }] = useMutation(DISMISS_FLAG_MUTATION, {
+    refetchQueries: ['DashboardPage', 'PropertiesPage'],
+    awaitRefetchQueries: true
+  });
+  const [confirmScam, { loading: confirming }] = useMutation(CONFIRM_SCAM_MUTATION, {
+    refetchQueries: ['DashboardPage', 'PropertiesPage'],
+    awaitRefetchQueries: true
+  });
   const stats = [
     { label: 'Active properties', value: data?.dashboardStats.totalActiveProperties ?? 0 },
     { label: 'Views this month', value: data?.dashboardStats.totalViewsThisMonth ?? 0 },
@@ -48,6 +68,30 @@ export const DashboardPage = () => {
   ];
   const trend = data?.dashboardViewsOverTime ?? [];
   const topViews = Math.max(...trend.map((point: { views: number }) => point.views), 1);
+  const isReviewing = dismissing || confirming;
+
+  const handleFlagAction = async (type: 'dismiss' | 'confirm', flagId: string) => {
+    const defaultReason =
+      type === 'dismiss'
+        ? 'Reviewed manually and determined to be a false positive.'
+        : 'Confirmed as a scam and archived from the active portfolio.';
+    const reason = window.prompt(
+      type === 'dismiss' ? 'Dismiss reason' : 'Confirm scam reason',
+      defaultReason
+    );
+
+    if (!reason?.trim()) {
+      return;
+    }
+
+    const mutate = type === 'dismiss' ? dismissFlag : confirmScam;
+    await mutate({
+      variables: {
+        flagId,
+        reason
+      }
+    });
+  };
 
   return (
     <section className="space-y-8">
@@ -59,8 +103,8 @@ export const DashboardPage = () => {
           Portfolio performance and listing trust in one place.
         </h2>
         <p className="text-base leading-7 text-ink/70">
-          This scaffold wires the dashboard routes and presentation shell first. Data-backed cards,
-          charts, and flagged listing actions will be connected in the next build steps.
+          Live portfolio metrics, suspicious listing review, and view-volume tracking for the
+          current agent.
         </p>
       </div>
 
@@ -129,7 +173,7 @@ export const DashboardPage = () => {
                   confidenceScore: number;
                   primaryReason: string;
                   triggeredRule: string;
-                  property: { title: string; viewCount: number };
+                  property: { title: string; viewCount: number; id: string };
                 }) => (
                   <article key={flag.id} className="rounded-[1.5rem] border border-ink/10 bg-sand/40 p-4">
                     <div className="flex items-start justify-between gap-3">
@@ -144,6 +188,24 @@ export const DashboardPage = () => {
                     <div className="mt-3 flex items-center justify-between text-xs uppercase tracking-[0.18em] text-ink/45">
                       <span>{flag.triggeredRule.replaceAll('_', ' ')}</span>
                       <span>{flag.property.viewCount} views</span>
+                    </div>
+                    <div className="mt-4 flex gap-2">
+                      <button
+                        className="rounded-full border border-ink/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-ink/70 transition hover:bg-white disabled:opacity-60"
+                        disabled={isReviewing}
+                        type="button"
+                        onClick={() => void handleFlagAction('dismiss', flag.id)}
+                      >
+                        Dismiss
+                      </button>
+                      <button
+                        className="rounded-full bg-ink px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white transition hover:bg-pine disabled:opacity-60"
+                        disabled={isReviewing}
+                        type="button"
+                        onClick={() => void handleFlagAction('confirm', flag.id)}
+                      >
+                        Confirm scam
+                      </button>
                     </div>
                   </article>
                 )

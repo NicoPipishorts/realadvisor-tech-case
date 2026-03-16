@@ -5,6 +5,8 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { useAuth } from './lib/auth';
 import { DashboardPage } from './routes/DashboardPage';
 import { LoginPage } from './routes/LoginPage';
+import { PropertyDetailsPage } from './routes/PropertyDetailsPage';
+import { PropertyFormPage } from './routes/PropertyFormPage';
 import { PropertiesPage } from './routes/PropertiesPage';
 
 export const App = () => {
@@ -20,6 +22,9 @@ export const App = () => {
         <Route element={<AppShell />}>
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/properties" element={<PropertiesPage />} />
+          <Route path="/properties/:id" element={<PropertyDetailsPage />} />
+          <Route path="/properties/new" element={<PropertyFormPage />} />
+          <Route path="/properties/:id/edit" element={<PropertyFormPage />} />
         </Route>
       </Route>
       <Route

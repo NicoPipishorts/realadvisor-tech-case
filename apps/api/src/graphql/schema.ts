@@ -36,15 +36,30 @@ export const typeDefs = `#graphql
     triggeredRule: String!
   }
 
+  type PropertyViewEntry {
+    id: ID!
+    viewerType: String!
+    visitorId: String
+    viewedAt: String!
+  }
+
   type Property {
     id: ID!
     title: String!
+    description: String!
+    addressLine1: String!
+    city: String!
+    postalCode: String!
+    country: String!
     price: Float!
+    surfaceSqm: Float!
+    propertyType: String!
     status: PropertyStatus!
     createdAt: String!
     viewCount: Int!
     isFlagged: Boolean!
     flag: PropertyFlag
+    viewHistory(limit: Int = 20): [PropertyViewEntry!]!
   }
 
   type TopViewedProperty {
@@ -67,6 +82,19 @@ export const typeDefs = `#graphql
     totalCount: Int!
   }
 
+  input PropertyInput {
+    title: String!
+    description: String!
+    addressLine1: String!
+    city: String!
+    postalCode: String!
+    country: String!
+    price: Float!
+    surfaceSqm: Float!
+    propertyType: String!
+    status: PropertyStatus!
+  }
+
   type Query {
     health: String!
     me: Agent
@@ -81,9 +109,15 @@ export const typeDefs = `#graphql
       page: Int = 1
       pageSize: Int = 20
     ): PropertyConnection!
+    property(id: ID!): Property
   }
 
   type Mutation {
     login(email: String!, password: String!): AuthPayload!
+    createProperty(input: PropertyInput!): Property!
+    updateProperty(id: ID!, input: PropertyInput!): Property!
+    deleteProperty(id: ID!): Boolean!
+    dismissFlag(flagId: ID!, reason: String!): Boolean!
+    confirmScam(flagId: ID!, reason: String!): Boolean!
   }
 `;
