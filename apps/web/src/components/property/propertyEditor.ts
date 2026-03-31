@@ -3,6 +3,7 @@ export type PropertyStatus = 'DRAFT' | 'ACTIVE' | 'SOLD' | 'ARCHIVED';
 export type PropertyFormState = {
   title: string;
   description: string;
+  imageUrl: string;
   addressLine1: string;
   city: string;
   postalCode: string;

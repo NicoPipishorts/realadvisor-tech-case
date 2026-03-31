@@ -4,6 +4,15 @@ import { z } from 'zod';
 export const propertyInputSchema = z.object({
   title: z.string().trim().min(3).max(120),
   description: z.string().trim().min(10).max(2000),
+  imageUrl: z
+    .string()
+    .trim()
+    .refine(
+      (value) => value.length === 0 || value.startsWith('/') || /^https?:\/\//.test(value),
+      'Image URL must be an absolute URL or root-relative path.'
+    )
+    .optional()
+    .transform((value) => value?.trim() || undefined),
   addressLine1: z.string().trim().min(3).max(140),
   city: z.string().trim().min(2).max(80),
   postalCode: z.string().trim().min(2).max(20),
@@ -20,6 +29,17 @@ export const propertyInclude = {
   analytics: {
     select: {
       lifetimeViewCount: true
+    }
+  },
+  coListings: {
+    select: {
+      agent: {
+        select: {
+          id: true,
+          name: true,
+          email: true
+        }
+      }
     }
   },
   suspiciousFlags: {
@@ -84,14 +104,16 @@ export const buildLifecycleTimestamps = (status: PropertyStatus, existing?: Prop
   }
 };
 
-export const mapProperty = (property: PropertyWithRelations) => {
+export const mapProperty = (property: PropertyWithRelations & { imageUrl?: string | null }) => {
   const latestFlag = property.suspiciousFlags[0] ?? null;
   const flag = property.suspiciousFlags.find((item) => item.status === FlagStatus.OPEN) ?? null;
+  const coListingAgents = property.coListings.map((coListing) => coListing.agent);
 
   return {
     id: property.id,
     title: property.title,
     description: property.description,
+    imageUrl: property.imageUrl ?? null,
     addressLine1: property.addressLine1,
     city: property.city,
     postalCode: property.postalCode,
@@ -102,6 +124,9 @@ export const mapProperty = (property: PropertyWithRelations) => {
     status: property.status,
     createdAt: property.createdAt.toISOString(),
     viewCount: property.analytics?.lifetimeViewCount ?? 0,
+    isCoListed: coListingAgents.length > 0,
+    coListingCount: coListingAgents.length,
+    coListingAgents,
     isFlagged: Boolean(flag),
     flag,
     latestFlag

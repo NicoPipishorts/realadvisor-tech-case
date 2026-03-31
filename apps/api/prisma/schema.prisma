@@ -67,6 +67,7 @@ model Property {
   primaryAgentId  String
   title           String
   description     String
+  imageUrl        String?
   addressLine1    String
   city            String
   postalCode      String

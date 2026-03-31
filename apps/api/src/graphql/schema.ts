@@ -64,6 +64,7 @@ export const typeDefs = `#graphql
     id: ID!
     title: String!
     description: String!
+    imageUrl: String
     addressLine1: String!
     city: String!
     postalCode: String!
@@ -74,6 +75,9 @@ export const typeDefs = `#graphql
     status: PropertyStatus!
     createdAt: String!
     viewCount: Int!
+    isCoListed: Boolean!
+    coListingCount: Int!
+    coListingAgents: [Agent!]!
     isFlagged: Boolean!
     flag: PropertyFlag
     latestFlag: PropertyFlag
@@ -109,6 +113,7 @@ export const typeDefs = `#graphql
   input PropertyInput {
     title: String!
     description: String!
+    imageUrl: String
     addressLine1: String!
     city: String!
     postalCode: String!

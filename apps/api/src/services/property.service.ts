@@ -97,6 +97,7 @@ const buildDetectionInput = (property: {
   primaryAgentId: string;
   title: string;
   description: string;
+  imageUrl?: string | null;
   addressLine1: string;
   city: string;
   postalCode: string;
@@ -109,6 +110,7 @@ const buildDetectionInput = (property: {
   primaryAgentId: property.primaryAgentId,
   title: property.title,
   description: property.description,
+  imageUrl: property.imageUrl,
   addressLine1: property.addressLine1,
   city: property.city,
   postalCode: property.postalCode,

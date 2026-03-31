@@ -7,6 +7,9 @@ type PropertyState = Pick<
   'id' | 'primaryAgentId' | 'status' | 'price' | 'activatedAt' | 'soldAt'
 >;
 
+// Summary counters kept per agent (one row in AgentDashboardStats).
+// cumulativeDaysToSell + soldWithActivationCount together allow computing
+// avg days-to-sell = cumulativeDaysToSell / soldWithActivationCount.
 type DashboardSummaryDelta = {
   draftCount?: number;
   activeCount?: number;
@@ -17,12 +20,15 @@ type DashboardSummaryDelta = {
   soldWithActivationCount?: number;
 };
 
+// Per-day, per-agent rollup used for time-series charts.
 type DailyDelta = {
   viewCount?: number;
   soldCount?: number;
   salesRevenue?: number;
 };
 
+// Maps each PropertyStatus to the corresponding summary counter field,
+// so status changes can be applied generically without a switch statement.
 const STATUS_FIELDS: Record<PropertyStatus, keyof DashboardSummaryDelta> = {
   DRAFT: 'draftCount',
   ACTIVE: 'activeCount',
@@ -36,6 +42,7 @@ const startOfDay = (value: Date) => {
   return date;
 };
 
+// Guards: skip DB writes when nothing actually changed
 const hasSummaryDelta = (delta: DashboardSummaryDelta) =>
   Object.values(delta).some((value) => value !== undefined && value !== 0);
 
@@ -53,6 +60,8 @@ const buildSummaryCreate = (agentId: string, delta?: DashboardSummaryDelta) => (
   soldWithActivationCount: delta?.soldWithActivationCount ?? 0
 });
 
+// Produces Prisma increment operations — only includes fields with a non-zero delta
+// so unrelated counters are never accidentally zeroed out.
 const buildSummaryUpdate = (delta: DashboardSummaryDelta) => ({
   ...(delta.draftCount ? { draftCount: { increment: delta.draftCount } } : {}),
   ...(delta.activeCount ? { activeCount: { increment: delta.activeCount } } : {}),
@@ -69,6 +78,8 @@ const buildSummaryUpdate = (delta: DashboardSummaryDelta) => ({
     : {})
 });
 
+// Returns the number of days a property was on market (activatedAt → soldAt),
+// or null if the data is incomplete or invalid.
 const daysToSellForProperty = (property: PropertyState | null | undefined) => {
   if (
     !property ||
@@ -88,6 +99,8 @@ const daysToSellForProperty = (property: PropertyState | null | undefined) => {
   return Math.round(diffMs / 86400000);
 };
 
+// Returns the sale date and revenue for a sold property so it can be
+// rolled into AgentDailyStat. Returns null for non-sold properties.
 const salesContributionForProperty = (property: PropertyState | null | undefined) => {
   if (!property || property.status !== PropertyStatus.SOLD || !property.soldAt) {
     return null;
@@ -99,6 +112,8 @@ const salesContributionForProperty = (property: PropertyState | null | undefined
   };
 };
 
+// Accumulates daily deltas into a keyed map (YYYY-MM-DD → delta).
+// Multiple contributions for the same day are merged by summing each field.
 const mergeDailyDelta = (
   target: Map<string, { date: Date; delta: DailyDelta }>,
   date: Date,
@@ -116,6 +131,8 @@ const mergeDailyDelta = (
   target.set(key, existing);
 };
 
+// Ensures the agent has a summary row, creating one with all-zero counters if absent.
+// Called before any operation that reads from the row to avoid NOT NULL violations.
 export const ensureAgentDashboardStatsRow = async (db: DbClient, agentId: string) => {
   await db.agentDashboardStats.upsert({
     where: { agentId },
@@ -124,6 +141,16 @@ export const ensureAgentDashboardStatsRow = async (db: DbClient, agentId: string
   });
 };
 
+// Core incremental update: applies the diff between `before` and `after` property states
+// to all analytics tables without recalculating from scratch.
+//
+// Pattern: decrement counters for `before`, increment for `after`.
+// This handles creation (before = null), deletion (after = null), and edits alike.
+//
+// Also maintains:
+// - cumulativeDaysToSell / soldWithActivationCount for avg time-on-market
+// - AgentDailyStat rows for the sold date (soldCount + salesRevenue)
+// - PropertyAnalytics row (ensures the property is tracked under the correct agent)
 export const applyPropertyStateDelta = async (
   db: DbClient,
   before: PropertyState | null,
@@ -137,6 +164,7 @@ export const applyPropertyStateDelta = async (
 
   const summaryDelta: DashboardSummaryDelta = {};
 
+  // Decrement the counter for the old status, increment for the new status
   if (before) {
     const beforeField = STATUS_FIELDS[before.status];
     summaryDelta[beforeField] = (summaryDelta[beforeField] ?? 0) - 1;
@@ -169,9 +197,11 @@ export const applyPropertyStateDelta = async (
       update: buildSummaryUpdate(summaryDelta)
     });
   } else {
+    // No summary change, but still ensure the row exists
     await ensureAgentDashboardStatsRow(db, agentId);
   }
 
+  // Build daily deltas: reverse the before sale contribution, apply the after sale contribution
   const beforeSale = salesContributionForProperty(before);
   const afterSale = salesContributionForProperty(after);
   const dailyDeltas = new Map<string, { date: Date; delta: DailyDelta }>();
@@ -219,6 +249,7 @@ export const applyPropertyStateDelta = async (
     });
   }
 
+  // Keep PropertyAnalytics in sync with the property's current agent assignment
   if (after) {
     await db.propertyAnalytics.upsert({
       where: { propertyId: after.id },
@@ -234,6 +265,11 @@ export const applyPropertyStateDelta = async (
   }
 };
 
+// Records a single property view across all four analytics tables atomically:
+// - AgentDashboardStats.totalViewsAllTime (all-time counter)
+// - AgentDailyStat.viewCount (per-day rollup for charts)
+// - PropertyAnalytics.lifetimeViewCount + lastViewedAt (per-property totals)
+// - PropertyViewDaily.viewCount (per-property per-day breakdown)
 export const recordPropertyViewAnalytics = async (
   db: DbClient,
   input: {
@@ -325,6 +361,10 @@ type AggregateDailyViewRow = {
   count: number;
 };
 
+// Full recalculation of all analytics for an agent — used for backfills or repair.
+// First repairs any PropertyView rows whose ownerAgentId is stale (e.g. after agent reassignment),
+// then rebuilds AgentDashboardStats, AgentDailyStat, PropertyAnalytics, and PropertyViewDaily
+// from scratch within a single transaction (delete-then-insert pattern).
 export const rebuildAgentAnalytics = async (prisma: PrismaClient, agentId: string) => {
   const agentExists = await prisma.agent.findUnique({
     where: { id: agentId },
@@ -335,6 +375,7 @@ export const rebuildAgentAnalytics = async (prisma: PrismaClient, agentId: strin
     throw new Error('Authenticated agent no longer exists. Please sign in again.');
   }
 
+  // Repair ownerAgentId on PropertyView rows so the aggregation queries below are accurate
   await prisma.$executeRaw`
     UPDATE "PropertyView" pv
     SET "ownerAgentId" = p."primaryAgentId"
@@ -356,6 +397,7 @@ export const rebuildAgentAnalytics = async (prisma: PrismaClient, agentId: strin
     }
   });
 
+  // Build summary and daily stat accumulators by iterating all properties
   const summary = buildSummaryCreate(agentId);
   const dailyStatsMap = new Map<string, { date: Date; viewCount: number; soldCount: number; salesRevenue: number }>();
 
@@ -388,6 +430,7 @@ export const rebuildAgentAnalytics = async (prisma: PrismaClient, agentId: strin
     }
   }
 
+  // Aggregate all-time and daily view counts from PropertyView via raw SQL for performance
   const propertyViewAggregates = await prisma.$queryRaw<Array<AggregateViewRow>>(Prisma.sql`
     SELECT
       pv."propertyId" AS "propertyId",
@@ -413,6 +456,7 @@ export const rebuildAgentAnalytics = async (prisma: PrismaClient, agentId: strin
     0
   );
 
+  // Merge view counts into the daily stats map alongside sales data
   for (const row of dailyViewAggregates) {
     const key = row.date.toISOString().slice(0, 10);
     const existing =
@@ -442,6 +486,7 @@ export const rebuildAgentAnalytics = async (prisma: PrismaClient, agentId: strin
   const propertyViewDailyRows = dailyViewAggregates.filter((row) => propertyIds.has(row.propertyId));
   const agentDailyRows = Array.from(dailyStatsMap.values());
 
+  // Atomic replace: update summary in-place, delete and recreate all time-series rows
   await prisma.$transaction(async (tx) => {
     await tx.agentDashboardStats.upsert({
       where: { agentId },
@@ -500,6 +545,9 @@ export const rebuildAgentAnalytics = async (prisma: PrismaClient, agentId: strin
   });
 };
 
+// Lazy backfill: runs a full rebuild only if the agent has no summary row yet.
+// Called on first dashboard load so new agents get their stats populated on demand
+// without requiring an explicit migration step.
 export const ensureAgentAnalyticsBackfilled = async (prisma: PrismaClient, agentId: string) => {
   const agentExists = await prisma.agent.findUnique({
     where: { id: agentId },

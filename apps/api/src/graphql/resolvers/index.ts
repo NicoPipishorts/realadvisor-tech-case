@@ -52,6 +52,7 @@ type PropertyInputArgs = {
   input: {
     title: string;
     description: string;
+    imageUrl?: string;
     addressLine1: string;
     city: string;
     postalCode: string;

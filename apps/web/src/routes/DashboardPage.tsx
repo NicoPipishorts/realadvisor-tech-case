@@ -28,13 +28,13 @@ const DASHBOARD_QUERY = gql`
       date
       views
     }
-    topViewedProperties(limit: 5) {
+    topViewedProperties(limit: 9) {
       id
       title
       status
       viewCount
     }
-    flaggedProperties(limit: 5) {
+    flaggedProperties(limit: 6) {
       id
       confidenceScore
       primaryReason
@@ -205,7 +205,7 @@ export const DashboardPage = () => {
 
         <DashboardStatsGrid loading={loading} stats={stats} />
 
-        <div className="grid gap-6 xl:grid-cols-[1.5fr_1fr]">
+        <div className="space-y-6">
           <DashboardViewsPanel
             loading={loading}
             offsetDays={offsetDays}

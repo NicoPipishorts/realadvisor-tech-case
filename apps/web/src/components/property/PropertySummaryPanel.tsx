@@ -9,6 +9,12 @@ type PropertySummaryPanelProps = {
   postalCode: string;
   city: string;
   country: string;
+  isCoListed: boolean;
+  coListingAgents: Array<{
+    id: string;
+    name: string;
+    email: string;
+  }>;
 };
 
 const formatCurrency = (value: number) =>
@@ -37,7 +43,9 @@ export const PropertySummaryPanel = ({
   addressLine1,
   postalCode,
   city,
-  country
+  country,
+  isCoListed,
+  coListingAgents
 }: PropertySummaryPanelProps) => (
   <section className="rounded-[2rem] border border-ink/10 bg-white/80 p-6 shadow-sm">
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -65,6 +73,12 @@ export const PropertySummaryPanel = ({
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">Created</p>
         <p className="mt-2 text-lg font-semibold text-ink">{formatDateTime(createdAt)}</p>
       </article>
+      <article className="rounded-[1.5rem] bg-sand/40 p-4">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">Co-listing</p>
+        <p className="mt-2 text-lg font-semibold text-ink">
+          {isCoListed ? `Yes, ${coListingAgents.length} partner${coListingAgents.length > 1 ? 's' : ''}` : 'No'}
+        </p>
+      </article>
     </div>
 
     <div className="mt-6 rounded-[1.5rem] border border-ink/10 bg-white p-5">
@@ -74,5 +88,23 @@ export const PropertySummaryPanel = ({
         {postalCode} {city}, {country}
       </p>
     </div>
+
+    {isCoListed ? (
+      <div className="mt-6 rounded-[1.5rem] border border-sky-200 bg-sky-50/70 p-5">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-800">
+          Co-listed with
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {coListingAgents.map((agent) => (
+            <span
+              key={agent.id}
+              className="rounded-full border border-sky-200 bg-white px-3 py-2 text-sm font-medium text-sky-900"
+            >
+              {agent.name}
+            </span>
+          ))}
+        </div>
+      </div>
+    ) : null}
   </section>
 );

@@ -36,6 +36,8 @@ const PROPERTIES_QUERY = gql`
         status
         createdAt
         viewCount
+        isCoListed
+        coListingCount
         isFlagged
         flag {
           confidenceScore

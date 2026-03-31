@@ -19,6 +19,7 @@ const PROPERTY_QUERY = gql`
       id
       title
       description
+      imageUrl
       addressLine1
       city
       postalCode
@@ -27,6 +28,13 @@ const PROPERTY_QUERY = gql`
       surfaceSqm
       propertyType
       status
+      isCoListed
+      coListingCount
+      coListingAgents {
+        id
+        name
+        email
+      }
       isFlagged
       flag {
         id
@@ -91,6 +99,7 @@ const RESTORE_CONFIRMED_SCAM_MUTATION = gql`
 const emptyFormState: PropertyFormState = {
   title: '',
   description: '',
+  imageUrl: '',
   addressLine1: '',
   city: '',
   postalCode: '',
@@ -114,6 +123,10 @@ const validate = (state: PropertyFormState) => {
 
   if (state.description.trim().length < 10) {
     return 'Description must be at least 10 characters.';
+  }
+
+  if (state.imageUrl.trim() && !state.imageUrl.startsWith('/') && !/^https?:\/\//.test(state.imageUrl.trim())) {
+    return 'Image URL must start with / or http(s)://';
   }
 
   if (state.addressLine1.trim().length < 3) {
@@ -182,6 +195,7 @@ export const PropertyFormPage = () => {
     setFormState({
       title: data.property.title,
       description: data.property.description,
+      imageUrl: data.property.imageUrl ?? '',
       addressLine1: data.property.addressLine1,
       city: data.property.city,
       postalCode: data.property.postalCode,
@@ -317,9 +331,35 @@ export const PropertyFormPage = () => {
             Back to properties
           </Link>
         }
+        badges={
+          data?.property?.isCoListed ? (
+            <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-sky-800">
+              Co-listed with {data.property.coListingCount} agent
+              {data.property.coListingCount > 1 ? 's' : ''}
+            </span>
+          ) : null
+        }
         eyebrow={pageEyebrow}
         title={pageTitle}
       />
+
+      {data?.property?.isCoListed ? (
+        <section className="rounded-[2rem] border border-sky-200 bg-sky-50/70 p-5 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-sky-800">
+            Co-listing partners
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {data.property.coListingAgents.map((agent: { id: string; name: string }) => (
+              <span
+                key={agent.id}
+                className="rounded-full border border-sky-200 bg-white px-3 py-2 text-sm font-medium text-sky-900"
+              >
+                {agent.name}
+              </span>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {displayFlag ? (
         <ListingReviewCard

@@ -1,5 +1,8 @@
 import { Link } from 'react-router-dom';
 
+import { CoListingIcon } from '../icons/CoListingIcon';
+import { EditIcon } from '../icons/EditIcon';
+import { TrashIcon } from '../icons/TrashIcon';
 import type { PropertyListItem } from './types';
 
 const columns = ['Title', 'Price', 'Status', 'Views', 'Created', 'Actions'];
@@ -36,8 +39,8 @@ export const PropertiesTable = ({
   onOpen,
   onDelete
 }: PropertiesTableProps) => (
-  <div className="overflow-x-auto">
-    <table className="min-w-full border-separate border-spacing-y-3 px-2">
+  <div className="overflow-x-auto px-5">
+    <table className="min-w-full border-separate border-spacing-y-3">
       <thead>
         <tr>
           {columns.map((column) => (
@@ -69,10 +72,19 @@ export const PropertiesTable = ({
             >
               <td
                 className={[
-                  'rounded-l-2xl px-4 py-4',
+                  'relative rounded-l-2xl px-4 py-4',
+                  property.isCoListed ? 'pl-11' : '',
                   property.isFlagged ? `${flaggedCellClass} border-r-0` : ''
                 ].join(' ')}
               >
+                {property.isCoListed ? (
+                  <span
+                    className="absolute left-0 top-1/2 inline-flex h-10 w-10 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-sky-200 bg-sky-100 text-sky-800 shadow-sm"
+                    title={`Co-listed with ${property.coListingCount} partner${property.coListingCount > 1 ? 's' : ''}`}
+                  >
+                    <CoListingIcon />
+                  </span>
+                ) : null}
                 <div className="flex items-center gap-3">
                   <span className="font-medium text-ink">{property.title}</span>
                   {property.isFlagged ? (
@@ -107,22 +119,26 @@ export const PropertiesTable = ({
               >
                 <div className="flex items-center gap-2">
                   <Link
-                    className="rounded-full border border-ink/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-ink/60 transition hover:bg-white"
+                    aria-label={`Edit ${property.title}`}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-ink/10 text-ink/60 transition hover:bg-white"
+                    title="Edit listing"
                     to={`/properties/${property.id}/edit`}
                     onClick={(event) => event.stopPropagation()}
                   >
-                    Edit
+                    <EditIcon />
                   </Link>
                   <button
-                    className="rounded-full border border-red-200 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-red-700 transition hover:bg-red-50 disabled:opacity-60"
+                    aria-label={`Delete ${property.title}`}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-red-200 text-red-700 transition hover:bg-red-50 disabled:opacity-60"
                     disabled={deleteLoading}
+                    title="Delete listing"
                     type="button"
                     onClick={(event) => {
                       event.stopPropagation();
                       onDelete(property.id, property.title);
                     }}
                   >
-                    Delete
+                    <TrashIcon />
                   </button>
                 </div>
               </td>

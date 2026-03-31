@@ -14,6 +14,7 @@ const PROPERTY_DETAILS_QUERY = gql`
       id
       title
       description
+      imageUrl
       addressLine1
       city
       postalCode
@@ -24,6 +25,13 @@ const PROPERTY_DETAILS_QUERY = gql`
       status
       createdAt
       viewCount
+      isCoListed
+      coListingCount
+      coListingAgents {
+        id
+        name
+        email
+      }
       isFlagged
       flag {
         id
@@ -194,6 +202,13 @@ export const PropertyDetailsPage = () => {
             ) : null}
           </>
         }
+        badges={
+          property.isCoListed ? (
+            <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-sky-800">
+              Co-listed with {property.coListingCount} agent{property.coListingCount > 1 ? 's' : ''}
+            </span>
+          ) : null
+        }
         description={property.description}
         eyebrow="Property Preview"
         title={property.title}
@@ -204,6 +219,16 @@ export const PropertyDetailsPage = () => {
           description="This listing was flagged by the trust review workflow and may need manual attention."
           flag={displayFlag}
         />
+      ) : null}
+
+      {property.imageUrl ? (
+        <section className="overflow-hidden rounded-[2rem] border border-ink/10 bg-white/80 shadow-sm">
+          <img
+            alt={property.title}
+            className="h-[20rem] w-full object-cover md:h-[26rem]"
+            src={property.imageUrl}
+          />
+        </section>
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-[1.35fr_0.65fr]">
@@ -218,6 +243,8 @@ export const PropertyDetailsPage = () => {
           status={property.status}
           surfaceSqm={property.surfaceSqm}
           viewCount={property.viewCount}
+          isCoListed={property.isCoListed}
+          coListingAgents={property.coListingAgents}
         />
 
         <aside className="space-y-6">

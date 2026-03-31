@@ -60,7 +60,7 @@ export const DashboardViewsPanel = ({
       <p className="mt-4 text-xs font-semibold uppercase tracking-[0.2em] text-ink/40">
         {windowLabel}
       </p>
-      <div className="mt-6 space-y-3 rounded-[1.5rem] border border-ink/10 bg-sand/40 p-4">
+      <div className="relative mt-6 rounded-[1.5rem] border border-ink/10 bg-sand/40 p-5">
         {loading ? (
           <div className="flex h-72 items-center justify-center text-sm text-ink/50">
             Loading trend...
@@ -70,34 +70,55 @@ export const DashboardViewsPanel = ({
             No view data yet.
           </div>
         ) : (
-          trend.map((point) => {
-            const isSelected = selectedDate === point.date;
-
-            return (
-              <button
-                key={point.date}
-                className={[
-                  'group grid w-full grid-cols-[4rem_1fr_2rem] items-center gap-3 rounded-xl px-3 py-2 text-left transition',
-                  isSelected
-                    ? 'bg-white shadow-sm ring-1 ring-pine/10'
-                    : 'hover:bg-white/80 hover:shadow-sm hover:ring-1 hover:ring-ink/10'
-                ].join(' ')}
-                type="button"
-                onClick={() => onSelectDate(point.date)}
+          <>
+            <div className="pointer-events-none absolute inset-x-5 top-5 bottom-[4.75rem] grid grid-rows-4">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div key={index} className="border-t border-dashed border-ink/10" />
+              ))}
+            </div>
+            <div className="relative pb-1">
+              <div
+                className="grid min-h-[21rem] w-full items-end gap-2 sm:gap-3"
+                style={{
+                  gridTemplateColumns: `repeat(${trend.length}, minmax(0, 1fr))`
+                }}
               >
-                <span className="text-xs font-medium text-ink/55">{formatShortDate(point.date)}</span>
-                <div className="h-3 overflow-hidden rounded-full bg-white">
-                  <div
-                    className="h-full rounded-full bg-pine transition-all duration-150 group-hover:bg-pine"
-                    style={{
-                      width: `${Math.max((point.views / topViews) * 100, point.views ? 8 : 0)}%`
-                    }}
-                  />
-                </div>
-                <span className="text-right text-xs font-semibold text-ink/60">{point.views}</span>
-              </button>
-            );
-          })
+                {trend.map((point) => {
+                  const isSelected = selectedDate === point.date;
+
+                  return (
+                    <button
+                      key={point.date}
+                      className={[
+                        'group flex h-full flex-col justify-end gap-2 rounded-[1.25rem] px-1 py-3 text-center transition sm:px-2',
+                        isSelected
+                          ? 'bg-white shadow-sm ring-1 ring-pine/10'
+                          : 'hover:bg-white/80 hover:shadow-sm hover:ring-1 hover:ring-ink/10'
+                      ].join(' ')}
+                      type="button"
+                      onClick={() => onSelectDate(point.date)}
+                    >
+                      <span className="text-xs font-semibold text-ink/60">{point.views}</span>
+                      <div className="flex flex-1 items-end rounded-[1.1rem] bg-white/80 px-1 pt-4 sm:px-2">
+                        <div
+                          className={[
+                            'w-full rounded-t-[1rem] transition-all duration-150',
+                            isSelected ? 'bg-pine' : 'bg-pine/80 group-hover:bg-pine'
+                          ].join(' ')}
+                          style={{
+                            height: `${Math.max((point.views / topViews) * 100, point.views ? 12 : 4)}%`
+                          }}
+                        />
+                      </div>
+                      <span className="text-[0.68rem] font-medium uppercase tracking-[0.16em] text-ink/45">
+                        {formatShortDate(point.date)}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </>
         )}
       </div>
     </section>

@@ -18,17 +18,22 @@ export const FlaggedListingsPanel = ({
   onAction
 }: FlaggedListingsPanelProps) => (
   <section className="rounded-[2rem] border border-ink/10 bg-white/75 p-6 shadow-sm">
-    <h3 className="text-lg font-semibold text-ink">Flagged listings</h3>
-    <div className="mt-6 space-y-3">
+    <div className="max-w-3xl">
+      <h3 className="text-lg font-semibold text-ink">Flagged listings</h3>
+      <p className="mt-1 text-sm text-ink/55">
+        Open trust-review items that need a fast manual decision from the agent.
+      </p>
+    </div>
+    <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
       {loading ? (
-        <div className="flex h-72 items-center justify-center rounded-[1.5rem] border border-dashed border-ink/15 bg-sand/60 text-sm text-ink/50">
+        <div className="col-span-full flex h-72 items-center justify-center rounded-[1.5rem] border border-dashed border-ink/15 bg-sand/60 text-sm text-ink/50">
           Loading review queue...
         </div>
       ) : flags.length ? (
         flags.map((flag) => (
           <article
             key={flag.id}
-            className="rounded-[1.5rem] border border-ink/10 bg-sand/40 p-4"
+            className="flex h-full flex-col rounded-[1.5rem] border border-ink/10 bg-sand/40 p-4"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -44,7 +49,7 @@ export const FlaggedListingsPanel = ({
               <span>{flag.triggeredRule.replaceAll('_', ' ')}</span>
               <span>{flag.property.viewCount} views</span>
             </div>
-            <div className="mt-4 flex items-center justify-between gap-3">
+            <div className="mt-auto flex items-center justify-between gap-3 pt-6">
               <Link
                 className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-ink/10 text-ink/60 transition hover:bg-white"
                 title="View listing details"
@@ -74,7 +79,7 @@ export const FlaggedListingsPanel = ({
           </article>
         ))
       ) : (
-        <div className="flex h-72 items-center justify-center rounded-[1.5rem] border border-dashed border-ink/15 bg-sand/60 text-sm text-ink/50">
+        <div className="col-span-full flex h-72 items-center justify-center rounded-[1.5rem] border border-dashed border-ink/15 bg-sand/60 text-sm text-ink/50">
           No open flags.
         </div>
       )}

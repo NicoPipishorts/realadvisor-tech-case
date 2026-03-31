@@ -46,6 +46,29 @@ export const PropertyEditorForm = ({
     </label>
 
     <label className="block lg:col-span-2">
+      <span className="mb-2 block text-sm font-medium text-ink/70">Image URL</span>
+      <input
+        className="w-full rounded-2xl border border-ink/15 bg-white px-4 py-3 outline-none transition focus:border-pine"
+        placeholder="https://example.com/listing-image.jpg or /images/listing.jpg"
+        value={formState.imageUrl}
+        onChange={(event) => onFieldChange('imageUrl', event.target.value)}
+      />
+      <span className="mt-2 block text-xs text-ink/45">
+        Use a root-relative asset path or an absolute image URL.
+      </span>
+    </label>
+
+    {formState.imageUrl ? (
+      <div className="overflow-hidden rounded-[1.5rem] border border-ink/10 bg-sand/35 lg:col-span-2">
+        <img
+          alt="Property preview"
+          className="h-64 w-full object-cover"
+          src={formState.imageUrl}
+        />
+      </div>
+    ) : null}
+
+    <label className="block lg:col-span-2">
       <span className="mb-2 block text-sm font-medium text-ink/70">Address</span>
       <input
         className="w-full rounded-2xl border border-ink/15 bg-white px-4 py-3 outline-none transition focus:border-pine"

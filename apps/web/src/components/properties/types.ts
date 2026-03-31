@@ -19,6 +19,8 @@ export type PropertyListItem = {
   status: string;
   viewCount: number;
   createdAt: string;
+  isCoListed: boolean;
+  coListingCount: number;
   isFlagged: boolean;
   flag: null | {
     confidenceScore: number;

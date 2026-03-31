@@ -82,6 +82,13 @@ const streetNames = [
   'Avenue du Parc'
 ] as const;
 const portfolioSize = 24;
+const imageKeywordsByType = {
+  apartment: 'apartment,interior',
+  house: 'house,home',
+  villa: 'villa,house',
+  loft: 'loft,interior',
+  studio: 'studio,interior'
+} as const;
 
 const daysAgo = (days: number) => {
   const date = new Date();
@@ -129,6 +136,15 @@ const buildSurface = (propertyType: (typeof propertyTypes)[number], index: numbe
   return String(baseByType[propertyType] + (index % 4) * 9);
 };
 
+const buildPublicImageUrl = (
+  propertyType: (typeof propertyTypes)[number],
+  agentIndex: number,
+  index: number
+) =>
+  `https://loremflickr.com/1600/900/${imageKeywordsByType[propertyType]}?lock=${
+    agentIndex * portfolioSize + index + 1
+  }`;
+
 const buildPropertySet = (agent: SeedAgent, agentIndex: number) =>
   Array.from({ length: portfolioSize }, (_, index) => {
     const propertyType = propertyTypes[index % propertyTypes.length];
@@ -145,6 +161,7 @@ const buildPropertySet = (agent: SeedAgent, agentIndex: number) =>
     return {
       title: `${descriptor} ${propertyType} in ${agent.city}`,
       description: `${descriptor} ${propertyType} with ${amenity} in ${agent.city}. Well suited for buyers looking for a balanced mix of location, comfort, and long-term value.`,
+      imageUrl: buildPublicImageUrl(propertyType, agentIndex, index),
       addressLine1: `${12 + index} ${streetName}`,
       city: agent.city,
       postalCode: `${1000 + agentIndex * 100 + index}`,
